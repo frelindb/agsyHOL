@@ -1,4 +1,5 @@
 {-# LANGUAGE MultiParamTypeClasses, FlexibleContexts, TypeSynonymInstances, FlexibleInstances #-}
+
 module SearchControl where
 
 import Control.Monad
@@ -11,8 +12,7 @@ instance Refinable Proof Blk where
  refinements _ _ _ = return $
    [(0, newPlaceholder >>= \m1 -> newPlaceholder >>= \m2 -> return (Intro m1 m2), "Intro"),
     (0, newPlaceholder >>= \m1 -> newPlaceholder >>= \m2 -> return (Elim m1 m2), "Elim"),
-    (costRAA, newPlaceholder >>= \m -> return (RAA m), "RAA"){-,
-    (1500, newPlaceholder >>= \m1 -> newPlaceholder >>= \m2 -> newPlaceholder >>= \m3 -> newPlaceholder >>= \m4 -> return (AC m1 m2 m3 m4), "AC")-}
+    (costRAA, newPlaceholder >>= \m -> return (RAA m), "RAA")
    ]
 
 instance Refinable Hyp Blk where
@@ -93,14 +93,11 @@ refNTElimStep c f cep =
   _ -> []
 
 instance Refinable ProofEq Blk where
- refinements _ [{-BICheckProofEq typ-}] _ = return $
+ refinements _ [] _ = return $
   [(0, newPlaceholder >>= \m1 -> newPlaceholder >>= \m2 -> newPlaceholder >>= \m3 -> return (Simp (Comp m1 m2 m3)), "Simp"),
    (0{-1000-}, newPlaceholder >>= \m1 -> newPlaceholder >>= \m2 -> newPlaceholder >>= \m3 -> newPlaceholder >>= \m4 ->
        newPlaceholder >>= \m5 -> newPlaceholder >>= \m6 ->
-       return (Step m1 m2 (Comp m3 m4 m5) m6), "Step") {-] ++
-  (case typ of
-    Bool -> [-} , (costBoolExt, newPlaceholder >>= \m1 -> newPlaceholder >>= \m2 -> return (BoolExt m1 m2), "BoolExt"),
-   {- _ -> [])-}
+       return (Step m1 m2 (Comp m3 m4 m5) m6), "Step") , (costBoolExt, newPlaceholder >>= \m1 -> newPlaceholder >>= \m2 -> return (BoolExt m1 m2), "BoolExt"),
    (costFunExt, newPlaceholder >>= \m -> return (FunExt m), "FunExt")]
 
 instance Refinable ProofEqSimpB Blk where
@@ -152,7 +149,6 @@ instance Refinable Formula Blk where
        cargs (arg : args) = do
         marg <- case arg of
          F _ -> newPlaceholder >>= \m -> return (F $ Meta m)
---         Bind _ -> newPlaceholder >>= \m -> return (Bind $ Meta m)
          T _ -> newPlaceholder >>= \m -> return (T $ Meta m)
         margs <- cargs args
         return (marg : margs)
@@ -182,13 +178,13 @@ instance Refinable Formula Blk where
      issub _ = False
      gen = map (\v -> (0, newPlaceholder >>= \m -> return (App nu (Var v) (Meta m)), "App " ++ show v)) (subsvars env) ++
            (case hh info of
-             Nothing -> []  -- ?? why does this happen?
+             Nothing -> []
              Just (BICheckForm typ) -> case typ of
               Map t1 _ -> [(0, newPlaceholder >>= \m -> return (Lam nu t1 (Meta m)), "Lam")]
               _ -> [])
    Nothing ->
     case hh info of
-     Nothing -> return []  -- ?? why does this happen?
+     Nothing -> return []
      Just (BICheckForm typ) ->
       if computed info then
        case typ of
@@ -197,7 +193,6 @@ instance Refinable Formula Blk where
         _ -> return []
       else
        return [(0, return (Choice nu (NotM typ) (NotM $ Lam nu (NotM typ) $ NotM $ C nu Top []) (NotM ArgNil)), "choice_elt")]
-         -- not relevant since type is not Map now (doesn't have to be eta-long because is never compared to anything)
   where
    gg [] = Nothing
    gg (x@(BIUnifyForm{}) : _) = Just x
@@ -209,159 +204,11 @@ instance Refinable Formula Blk where
    computed (BIComputed : _) = True
    computed (_ : xs) = computed xs
 
-{-
- refinements _ info mm =
-  case hh info of
-   Nothing -> return []  -- ?? why does this happen?
-   Just (BICheckForm typ) -> case typ of
-    Map t1 _ -> return [(0, newPlaceholder >>= \m -> return (C nu Lam [T (NotM t1), Bind $ Meta m]), "Lam")]
-      -- doing map even if not BIComputed
-    _ -> case gg info of
-     Just (BIUnifyForm uids opp env) -> return $
-      case opp of
-       HNC muid c args ->
-        let (uid, cost) = gmuid muid
-        in  (cost, cargs args >>= \margs -> return (C uid c margs), "C " ++ show c)
-            : gen
-        where
-         cargs [] = return []
-         cargs (arg : args) = do
-          marg <- case arg of
-           F _ -> newPlaceholder >>= \m -> return (F $ Meta m)
-           Bind _ -> newPlaceholder >>= \m -> return (Bind $ Meta m)
-           T _ -> newPlaceholder >>= \m -> return (T $ Meta m)
-          margs <- cargs args
-          return (marg : margs)
-       HNApp muid (Var v) _ ->
-        case univar env v of
-         Just v ->
-          let (uid, cost) = gmuid muid
-          in  (cost, newPlaceholder >>= \m -> return (App uid (Var v) (Meta m)), "App " ++ show v)
-              : gen
-         Nothing ->
-          gen
-       HNApp muid elr@(Glob gv) _ ->
-        let (uid, cost) = gmuid muid
-        in  (cost, newPlaceholder >>= \m -> return (App uid elr (Meta m)), "App " ++ gvName gv)
-            : gen
-       HNChoice muid _ _ _ ->
-        let (uid, cost) = gmuid muid
-        in  (cost, newPlaceholder >>= \m1 -> newPlaceholder >>= \m2 -> newPlaceholder >>= \m3 ->
-                   return (Choice uid (Meta m1) (Meta m2) (Meta m3)), "Choice")
-            : gen
-      where
-       gmuid muid = case muid of
-        Just uid -> (muid, hocost + if uid `elem` uids then 1000 else 0)
-        Nothing -> (Just $ mid mm, hocost)
-       hocost = if any issub env then 200 else 0
-       issub (Sub{}) = True
-       issub _ = False
-       gen = map (\v -> (0, newPlaceholder >>= \m -> return (App nu (Var v) (Meta m)), "App " ++ show v)) (subsvars env)
-     Nothing ->
-      if computed info then
-       case typ of
-        Map t1 _ -> error "already handled"
-        Bool -> return [(0, return (C nu Top []), "Top"), (0, return (C nu Bot []), "Bot")]
-        _ -> return []
-      else
-       return [(0, return (Choice nu (NotM typ) (NotM $ C nu Top []) (NotM [])), "choice_elt")]
-         -- not relevant since type is not Map now (doesn't have to be eta-long because is never compared to anything)
-  where
-   gg [] = Nothing
-   gg (x@(BIUnifyForm{}) : _) = Just x
-   gg (_ : xs) = gg xs
-   hh [] = Nothing
-   hh (x@(BICheckForm {}) : _) = Just x
-   hh (_ : xs) = hh xs
-   computed [] = False
-   computed (BIComputed : _) = True
-   computed (_ : xs) = computed xs
--}
 
 instance Refinable Args Blk where
  refinements _ _ _ = return $
   [(0, return ArgNil, "ArgNil"),
    (0, newPlaceholder >>= \m1 -> newPlaceholder >>= \m2 -> return (ArgCons (Meta m1) (Meta m2)), "ArgCons")]
-
-{-
- refinements _ info _ = return $
-  [(0, replicateM narg (newPlaceholder >>= \m -> return (Meta m)) >>= \ms -> return ms, "args")]
-  where
-   narg = ff ityp
-   ff (Map _ t) = 1 + ff t
-   ff _ = 0
-   ityp = gg info
-   gg (BICheckFormArgs t : _) = t
-   gg (_ : xs) = gg xs
-   gg xs = error $ show info
--}
-
-{-
-checkEnvCtx env ctx c = if ch then c else error $ "checkEnvCtx failed\n" ++ pe env ++ "\n" ++ pc ctx ++ "\n" ++ show (subsvars env)
- where
-  ch = all (\v -> case lookupVarType ctx v of {Just{} -> True; Nothing -> False}) (subsvars env)
-  pe (Lift n : xs) = "Lift " ++ show n ++ " : " ++ pe xs
-  pe (Sub{} : xs) = "Sub{} : " ++ pe xs
-  pe (Skip : xs) = "Skip : " ++ pe xs
-  pe [] = "[]"
-  pc (VarExt{} : xs) = "VarExt{} : " ++ pc xs
-  pc (HypExt{} : xs) = "HypExt{} : " ++ pc xs
-  pc [] = "[]"
--}
-
-
-{-
- refinements _ (BIUnifyForm uids opp env stack typ : _) mm = return $
-  case opp of
-   HNC muid c args ->
-    if null stack then
-     let (uid, cost) = gmuid muid
-     in  (cost, cargs args >>= \margs -> return (C uid c margs), "C " ++ show c)
-         : gen
-    else
-     gen
-    where
-     cargs [] = return []
-     cargs (arg : args) = do
-      marg <- case arg of
-       F _ -> newPlaceholder >>= \m -> return (F $ Meta m)
-       Bind _ -> newPlaceholder >>= \m -> return (Bind $ Meta m)
-       T _ -> newPlaceholder >>= \m -> return (T $ Meta m)
-      margs <- cargs args
-      return (marg : margs)
-   HNApp muid (Var v) args ->
-    case univar env v of
-     Just v ->
-      let (uid, cost) = gmuid muid
-      in  (cost, replicateM (length args - length stack) (newPlaceholder >>= \m -> return (Meta m)) >>= \ms -> return (App uid (Var v) ms), "App " ++ show v)
-          : gen
-     Nothing ->
-      gen
-   HNApp muid elr@(Glob gv) args ->
-    let (uid, cost) = gmuid muid
-    in  (cost, replicateM (length args - length stack) (newPlaceholder >>= \m -> return (Meta m)) >>= \ms -> return (App uid elr ms), "App " ++ gvName gv)
-        : gen
-   HNChoice muid _ _ args ->
-    let (uid, cost) = gmuid muid
-    in  (cost, newPlaceholder >>= \m1 -> newPlaceholder >>= \m2 -> replicateM (length args - length stack) (newPlaceholder >>= \m -> return (Meta m)) >>= \ms ->
-               return (Choice uid (Meta m1) (Meta m2) ms), "Choice")
-        : gen
-  where
-   gen = map (\v -> (0, replicateM (narg - length stack) (newPlaceholder >>= \m -> return (Meta m)) >>= \ms -> return (App nu (Var v) ms), "App " ++ show v)) (subsvars env)
-         ++ abs
-   abs = case stack of
-          [] -> []
-          (_:_) -> [(0, newPlaceholder >>= \m1 -> newPlaceholder >>= \m2 -> return (C nu Lam [T (Meta m1), Bind (Meta m2)]), "Lam")]
-   narg = ff typ
-   ff (Map _ t) = 1 + ff t
-   ff _ = 0
-   gmuid muid = case muid of
-    Just uid -> (muid, hocost + if uid `elem` uids then 1000 else 0)
-    Nothing -> (Just $ mid mm, hocost)
-   hocost = if any issub env then 200 else 0
-   issub (Sub{}) = True
-   issub _ = False
--}
 
 instance Refinable CompTrace Blk where
  refinements _ [BICompTraceValue ctr] _ = return $ [(0, return ctr, "comptrace")]
@@ -424,7 +271,6 @@ pbc = return
 
 
 setCompTrace :: MetaCompTrace -> CompTrace -> MetaEnv MPB -> MetaEnv MPB
---setCompTrace pctr ctr cont = cont  -- TODO: set comptrace
 setCompTrace pctr ctr cont =
  gheadm (True, prioSetCompTrace, Just (BICompTraceValue ctr)) (return "setCompTrace") pctr $ \_ -> cont
 
@@ -435,17 +281,17 @@ data NewHypState = NewGlobHyps | NewHyp Int (Maybe (MetaHyp, MetaProofElim)) | N
 newHyp st = st {scsNewHyp = NewHyp (scsCtx st) Nothing}
 noNewHyp st = st {scsNewHyp = NoNewHyp}
 
-data SCState = SCState {scsCtx :: Int, scsHyps :: [HElr], scsNewHyp :: NewHypState{-, scsRAAok :: Bool-}}
+data SCState = SCState {scsCtx :: Int, scsHyps :: [HElr], scsNewHyp :: NewHypState}
 
 sidecontrol :: MetaProof -> SCState -> MetaEnv MPB
 sidecontrol prf st = scprf prf st
  where
   scprf prf st =
    gheadm (False, prioNo, Nothing) (pbc "sidecontrol") prf $ \prf -> case prf of
-    Intro prf _ -> scintro prf (st{- {scsRAAok = False}-})
+    Intro prf _ -> scintro prf st
     Elim hyp prf ->
      gheadm (False, prioNo, Nothing) (pbc "sidecontrol") hyp $ \(Hyp elr _) ->
-     travHyp elr (st{- {scsRAAok = False}-}) $ scelim prf
+     travHyp elr st $ scelim prf
      where
       scelim prf gc st =
        gheadm (False, prioNo, Nothing) (pbc "sidecontrol") prf $ \prf -> case prf of
@@ -499,13 +345,7 @@ sidecontrol prf st = scprf prf st
        NoNewHyp -> err "no recent hyp"
 
     RAA prf ->
---     if scsRAAok st then
-      extCtx (newHyp (st{- {scsRAAok = False}-})) $ scprf prf
-{-     else
-      err "not RAA in this place"-}
-{-    AC typ qf prfexi prf ->
-     andp (scprf prfexi st)
-          (scelim prf st)-}
+      extCtx (newHyp st) $ scprf prf
 
   scintro prf st =
    gheadm (False, prioNo, Nothing) (pbc "sidecontrol") prf $ \prf -> case prf of
@@ -517,7 +357,7 @@ sidecontrol prf st = scprf prf st
     ExistsI _ _ prf -> scprf prf (noNewHyp st)
     ImpliesI prf -> extCtx (newHyp st) $ scprf prf
     NotI prf -> extCtx (newHyp st) $ scprf prf
-    ForallI prf -> extCtx (noNewHyp (st{- {scsRAAok = True}-})) $ scprf prf
+    ForallI prf -> extCtx (noNewHyp st) $ scprf prf
     TopI -> ok
     EqI prf -> sceq prf False False (noNewHyp st)
 
@@ -605,7 +445,7 @@ sidecontrol prf st = scprf prf st
     SimpLam _ prf -> extCtx st $ sceq prf False True
     SimpCons _ prfs -> andps (\prf -> sceq prf False True st) prfs
     SimpApp prfs -> sceqsimpargs prfs st
-    SimpChoice prf prfs -> andp ({-extCtx st $ -}sceq prf False True st) $ sceqsimpargs prfs st
+    SimpChoice prf prfs -> andp (sceq prf False True st) $ sceqsimpargs prfs st
 
   sceqsimpargs prfs st =
    gheadm (False, prioNo, Nothing) (pbc "sidecontrol") prfs $ \prfs -> case prfs of

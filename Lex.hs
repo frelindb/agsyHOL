@@ -20,7 +20,6 @@ lexer cont cs = case ms cs of
    (c:cs) | isAlpha c && isLower c || (c == '_') || isDigit c -> lexName cont TKlowercasename (c:cs)
    (c:cs) | isAlpha c && isUpper c || (c == '_') -> lexName cont TKuppercasename (c:cs)
    ('\'':cs) -> let (s, rest) = spanstring cs in cont (TKstring s) rest
---        | isDigit c = lexNumber cont TKnumber (c:cs)
    (c:cs) -> failP "invalid character" [c]
 
 ms cs = f l
@@ -59,23 +58,6 @@ ms2 cs = f l
             ("include", TKinclude)
            ]
 
-{-
-lexer cont ('{':cs) = cont TKocurly cs
-lexer cont ('}':cs) = cont TKccurly cs
-lexer cont (':':cs) = cont TKcolon cs
-lexer cont (';':cs) = cont TKsemicolon cs
-lexer cont ('*':'?':cs) = cont TKstarquestion cs
-lexer cont ('*':cs) = cont TKstar cs
-lexer cont ('\\':cs) = cont TKlambda cs
-lexer cont ('?':cs) = cont TKquestion cs
-lexer cont ('=':cs) = cont TKequal cs
-lexer cont ('$':cs) = cont TKdollar cs
-lexer cont ('#':cs) = cont TKhash cs
-lexer cont ('%':cs) = cont TKprocent cs
--}
-
---lexNumber cont cnum cs = cont (cnum (read n)) rest
---   where (n, rest) = span isDigit cs
 
 lexName cont cstr cs = cont (cstr name) rest
    where (name,rest) = span isNameChar cs

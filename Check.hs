@@ -13,26 +13,22 @@ data CRes = CDone HNFormula CompTrace
           | CFail
 
 computei :: Int -> Bool -> CFormula -> [CArgs] -> MetaEnv (MMB CRes)
-computei 1000 _ _ _ = {-putStrLn "computei timeout" >>-} mbret CFail
+computei 1000 _ _ _ = mbret CFail
 computei count fromlookup cf@(Cl env f) stack = do
  f <- expandbind f
  case f of
   Meta m -> mbret $ CBlocked cf stack count
   NotM f -> case f of
    App muid (Var v) args ->
-    --gheadc args $ \args ->
     case doclos env v of
      Left v ->
-      --mbret $ CDone (HNApp (gmuid muid) (Var v) (map (Cl env) args ++ stack)) CompTraceSTUB
       mbret $ CDone (HNApp (gmuid muid) (Var v) (ClA env args : stack)) (CompTrace count)
      Right sf ->
       computei count True sf (ClA env args : stack)  -- changed (count + 1) to count when comptrace info was added
    App muid elr@(Glob _) args ->
-    --gheadc args $ \args ->
     mbret $ CDone (HNApp (gmuid muid) elr (ClA env args : stack)) (CompTrace count)
    Choice muid typ bdy args ->
-    --gheadc args $ \args ->
-    mbret $ CDone (HNChoice (gmuid muid) typ (Cl ({-Skip : -}env) bdy) (ClA env args : stack)) (CompTrace count)
+    mbret $ CDone (HNChoice (gmuid muid) typ (Cl env bdy) (ClA env args : stack)) (CompTrace count)
    Lam muid typ bdy ->
     cheadc (getStackHead stack) $ \res -> case res of
      HNNil ->
@@ -44,9 +40,8 @@ computei count fromlookup cf@(Cl env f) stack = do
      HNNil -> mbret $ CDone (HNC (gmuid muid) c (map clca args)) (CompTrace count)
       where
        clca (F f) = F $ Cl env f
---       clca (Bind qf) = Bind $ Cl (Skip : env) qf
        clca (T t) = T t
-     HNCons{} -> {-putStrLn ("computei: " ++ show (c, length stack)) >>-} mbret CFail
+     HNCons{} -> mbret CFail
  where
   gmuid muid = if fromlookup then Nothing else muid
 computei count fromlookup (CApp f (Cl env a)) stack = computei count fromlookup f (ClA env (NotM $ ArgCons a $ NotM ArgNil) : stack)
@@ -100,15 +95,8 @@ checkProof ctx form prf =
   Elim hyp prf ->
    checkHyp ctx hyp $ \focante ->
    checkProofElim ctx form focante prf
-{-  AC typ qf prfexi prf ->
-   andp (checkType (Meta typ)) (
-   andp (checkForm ctx (NotM $ Map (Meta typ) (NotM Bool)) (Meta qf)) (
-   andp (checkProof ctx (cl $ NotM $ C nu Exists [T (Meta typ), F (Meta qf)]) prfexi)
-        (checkProofElim ctx form (CApp (cl $ Meta qf) (cl $ NotM $ Choice nu (Meta typ) (Meta qf) (NotM ArgNil))) prf)))  -- done: add Skip to Meta qf closure?)
-   -- done: also check typ and well-formedness of qf against (Map typ Bool)? (yes, but only to ensure instantiation, use choicefcn if form i arbitrary)
-   -- (!! problematic because choice app might be non-etalong) -}
   RAA prf ->
-   andp  -- ?? sequential check instead?
+   andp
     (cheadp (prioNo, Nothing) (pbc "checkProof.RAA sidecond") (compute form) $ \(form, _) -> case form of
       HNC _ Bot _ -> err "type not Bot in Raa rule"
       HNC _ Forall _ -> err "type not Forall in Raa rule"
@@ -151,7 +139,7 @@ checkIntro ctx form prf =
    _ -> err "Pair : And"
   ExistsI _ witness prf -> case form of
    HNC _ Exists [T typ, F qf] ->
-    andp (checkForm ctx typ (Meta witness))  -- done: also check well-formedness of witness against typ? (yes, but only to ensure instantiation, use choicefcn if form i arbitrary)
+    andp (checkForm ctx typ (Meta witness))
          (checkProof ctx (CApp qf (cl (Meta witness))) prf)
    _ -> err "PairDep : Exists"
   ImpliesI prf -> case form of
@@ -172,7 +160,6 @@ checkIntro ctx form prf =
    _ -> err "Trivial : Top"
   EqI prf -> case form of
    HNC _ Eq [T typ, F lhs, F rhs] ->
-    --gheadp (False, prioUnknownType, Nothing) (pbc "checkIntro.Refl.typ") typ $ \typ ->
     checkProofEq [] [] ctx typ lhs rhs prf
    _ -> err "Refl : Eq"
 
@@ -180,7 +167,7 @@ checkProofElim :: Context-> CFormula -> CFormula -> MetaProofElim -> MetaEnv MPB
 checkProofElim ctx form focante prf =
  gheadm (True, prioProofElim, Nothing) (prCFormula (length ctx) form >>= \pe -> prCFormula (length ctx) focante >>= \pi -> return ("checkProofElim : " ++ pi ++ " -> " ++ pe)) prf $ \prf -> case prf of
   Use prf ->
-   andp  -- ?? sequential check instead?
+   andp
     (cheadp (prioNo, Nothing) (pbc "checkProofElim.Use sidecond") (compute focante) $ \(focante, _) -> case focante of
       HNC _ Bot _ -> err "inftype not Bot in Use rule"
       HNC _ Eq _ -> err "inftype not Eq in Use rule"
@@ -266,8 +253,7 @@ checkNTElimStep ctx focante cont prf =
    _ -> err "Projr : And"
   ExistsE _ prf -> case focante of
    HNC _ Exists [T typ, F cqf@(Cl env qf)] ->
-    cont (CApp cqf (Cl env $ NotM $ Choice nu typ qf (NotM ArgNil))) prf  -- done: strip Skip of env? (caused problem in SEV195^5.p)
-    -- (!! problematic because choice app might be non-etalong)
+    cont (CApp cqf (Cl env $ NotM $ Choice nu typ qf (NotM ArgNil))) prf
    _ -> err "ProjDep : Exists"
   ImpliesE prfarg prf -> case focante of
    HNC _ Implies [F forml, F formr] ->
@@ -276,12 +262,11 @@ checkNTElimStep ctx focante cont prf =
    _ -> err "AppImp : Implies"
   ForallE arg prf -> case focante of
    HNC _ Forall [T typ, F qf] ->
-    andp (checkForm ctx typ (Meta arg))  -- done: also check well-formedness of arg against typ? (yes, but only to ensure instantiation, use choicefcn if form i arbitrary)
+    andp (checkForm ctx typ (Meta arg))
          (cont (CApp qf (cl (Meta arg))) prf)
    _ -> err "AppDep : Forall"
   InvBoolExtl prfarg prf -> case focante of
    HNC _ Eq [T typ, F lhs, F rhs] ->
-    -- ?? parallel check instead
     gheadp (False, prioUnknownType, Nothing) (pbc "checkNTElimStep.InvBoolExtl") typ $ \typ -> case typ of
      Bool ->
       andp (checkProof ctx lhs prfarg)
@@ -290,7 +275,6 @@ checkNTElimStep ctx focante cont prf =
    _ -> err "InvBoolExtl : Eq"
   InvBoolExtr prfarg prf -> case focante of
    HNC _ Eq [T typ, F lhs, F rhs] ->
-    -- ?? parallel check instead
     gheadp (False, prioUnknownType, Nothing) (pbc "checkNTElimStep.InvBoolExtr") typ $ \typ -> case typ of
      Bool ->
       andp (checkProof ctx rhs prfarg)
@@ -299,7 +283,6 @@ checkNTElimStep ctx focante cont prf =
    _ -> err "InvBoolExtr : Eq"
   InvFunExt arg prf -> case focante of
    HNC uid Eq [T typ, F lhs, F rhs] ->
-    -- ?? parallel check instead
     gheadp (False, prioUnknownType, Nothing) (pbc "checkNTElimStep.InvFunExt") typ $ \typ -> case typ of
      Map it ot ->
       andp (checkForm ctx it (Meta arg))
@@ -309,7 +292,7 @@ checkNTElimStep ctx focante cont prf =
 
 checkProofEq :: [Int] -> [Int] -> Context -> MType -> CFormula -> CFormula -> MetaProofEq -> MetaEnv MPB
 checkProofEq luids ruids ctx typ lhs rhs prf =
- gheadm (True, prioProofEq, Nothing{-Just (BICheckProofEq typ)-}) (prCFormula (length ctx) lhs >>= \plhs -> prCFormula (length ctx) rhs >>= \prhs -> return ("checkProofEq " ++ plhs ++ " = " ++ prhs)) prf $ \prf -> case prf of
+ gheadm (True, prioProofEq, Nothing) (prCFormula (length ctx) lhs >>= \plhs -> prCFormula (length ctx) rhs >>= \prhs -> return ("checkProofEq " ++ plhs ++ " = " ++ prhs)) prf $ \prf -> case prf of
   Simp prf ->
    checkProofEqSimp luids ruids ctx typ lhs rhs prf
   Step hyp prfelim prfsimp prfeq ->
@@ -321,14 +304,12 @@ checkProofEq luids ruids ctx typ lhs rhs prf =
       (checkProofEqSimp [] [] ctx typ lhs lhs' prfsimp)
       (checkProofEq [] [] ctx typ rhs' rhs prfeq)
   BoolExt prf1 prf2 ->
-   -- ?? parallel check instead
    gheadp (False, prioUnknownType, Nothing) (pbc "checkProofEq.BoolExt") typ $ \typ -> case typ of
     Bool ->
      andp (checkProof (HypExt lhs : ctx) (lift 1 rhs) prf1)
           (checkProof (HypExt rhs : ctx) (lift 1 lhs) prf2)
     _ -> err "BoolExt : Bool"
   FunExt prf ->
-   -- ?? parallel check instead
    gheadp (False, prioUnknownType, Nothing) (pbc "checkProofEq.FunExt") typ $ \typ -> case typ of
     Map it ot ->
      checkProofEq luids ruids (VarExt it : ctx) ot (CApp (lift 1 lhs) (cl $ NotM $ App nu (Var 0) $ NotM $ ArgNil)) (CApp (lift 1 rhs) (cl $ NotM $ App nu (Var 0) $ NotM $ ArgNil)) prf
@@ -391,13 +372,13 @@ checkProofEqSimpB luids ruids ctx typ lhs rhs prf =
       andp (checkEqType ityp typ1) (
       andp (checkEqType ityp typ2)
            (checkProofEq luids ruids (VarExt ityp : ctx) otyp bdy1 bdy2 prfbdy))
-     _ -> err "eq lam type mismatch"  -- needed in eg SEU794^1
+     _ -> err "eq lam type mismatch"
    (HNLam _ typ1 bdy1, HNApp muid elr2 args2, SimpLam EMRight prfbdy) ->
     gheadp (False, prioUnknownType, Nothing) (pbc "checkProofEqSimpB.Lam") typ $ \typ -> case typ of
      Map ityp otyp ->
       andp (checkEqType ityp typ1)
            (checkProofEq luids ruids (VarExt ityp : ctx) otyp bdy1 bdy2 prfbdy)
-     _ -> err "eq lam type mismatch"  -- needed in eg PUZ136^1
+     _ -> err "eq lam type mismatch"
     where
      lelr2 = case elr2 of
               Var i -> Var (i + 1)
@@ -408,7 +389,7 @@ checkProofEqSimpB luids ruids ctx typ lhs rhs prf =
      Map ityp otyp ->
       andp (checkEqType ityp typ1)
            (checkProofEq luids ruids (VarExt ityp : ctx) otyp bdy1 bdy2 prfbdy)
-     _ -> err "eq lam type mismatch"  -- needed?
+     _ -> err "eq lam type mismatch"
     where
      bdy2 = CHN (HNChoice muid typ2 (lift 1 qf2) (map (\(ClA env x) -> ClA (Lift 1 : env) x) args2 ++ [ClA [] $ NotM $ ArgCons (NotM $ App nu (Var 0) $ NotM ArgNil) (NotM ArgNil)]))
    (HNApp muid elr1 args1, HNLam _ typ2 bdy2, SimpLam EMLeft prfbdy) ->
@@ -416,7 +397,7 @@ checkProofEqSimpB luids ruids ctx typ lhs rhs prf =
      Map ityp otyp ->
       andp (checkEqType ityp typ2)
            (checkProofEq luids ruids (VarExt ityp : ctx) otyp bdy1 bdy2 prfbdy)
-     _ -> err "eq lam type mismatch"  -- needed in eg SYO270^5
+     _ -> err "eq lam type mismatch"
     where
      lelr1 = case elr1 of
               Var i -> Var (i + 1)
@@ -427,7 +408,7 @@ checkProofEqSimpB luids ruids ctx typ lhs rhs prf =
      Map ityp otyp ->
       andp (checkEqType ityp typ2)
            (checkProofEq luids ruids (VarExt ityp : ctx) otyp bdy1 bdy2 prfbdy)
-     _ -> err "eq lam type mismatch"  -- needed?
+     _ -> err "eq lam type mismatch"
     where
      bdy1 = CHN (HNChoice muid typ1 (lift 1 qf1) (map (\(ClA env x) -> ClA (Lift 1 : env) x) args1 ++ [ClA [] $ NotM $ ArgCons (NotM $ App nu (Var 0) $ NotM ArgNil) (NotM ArgNil)]))
    (HNC _ c1 [T typ1, F qf1], HNC _ c2 [T typ2, F qf2], SimpCons c [prf]) | c1 == c && c2 == c && (c == Forall || c == Exists) ->
@@ -435,7 +416,6 @@ checkProofEqSimpB luids ruids ctx typ lhs rhs prf =
          (checkProofEq luids ruids ctx (NotM $ Map typ1 (NotM Bool)) qf1 qf2 prf)
    (HNC _ Eq [T typ1, F lhs1, F rhs1], HNC _ Eq [T typ2, F lhs2, F rhs2], SimpCons Eq [prflhs, prfrhs]) ->
     andp (checkEqType typ1 typ2) (
-          --gheadp (False, prioUnknownType, Nothing) (pbc "checkProofEqsimpB.Eq.typ") typ1 $ \typ1 ->
           andp (checkProofEq luids ruids ctx typ1 lhs1 lhs2 prflhs)
                (checkProofEq luids ruids ctx typ1 rhs1 rhs2 prfrhs))
    (HNC _ lhsc lhsargs, HNC _ rhsc rhsargs, SimpCons c prfs) | c == lhsc && c == rhsc ->  -- Top, Bot, And, Or, Implies, Not
@@ -445,15 +425,13 @@ checkProofEqSimpB luids ruids ctx typ lhs rhs prf =
      chargs (F f1 : fs1) (F f2 : fs2) (prf : prfs) =
       andp (checkProofEq luids ruids ctx typeBool f1 f2 prf)
            (chargs fs1 fs2 prfs)
---     chargs xs ys zs = err $ "eq HNC length mismatch" ++ show (length xs, length ys, length zs, show c)  -- should this be necessary?
    (HNApp _ elr1 args1, HNApp _ elr2 args2, SimpApp prfs) | eqElr elr1 elr2 ->
     elrType ctx elr1 $ \ityp ->
     chargs ityp args1 args2 prfs
    (HNChoice _ typ1 qf1 args1, HNChoice _ typ2 qf2 args2, SimpChoice prf prfs) ->
     andp (checkEqType typ1 typ2) (
     andp (checkProofEq luids ruids ctx (NotM $ Map typ1 typeBool) qf1 qf2 prf)
-         (--gheadp (False, prioUnknownType, Nothing) (pbc "checkProofEqsimpB.Choice.typ") typ1 $ \typ1 ->
-          chargs typ1 args1 args2 prfs))
+         (chargs typ1 args1 args2 prfs))
    _ -> err "eq head mismatch"
  where
   chargs :: MType -> [CArgs] -> [CArgs] -> MetaProofEqs -> MetaEnv MPB
@@ -475,7 +453,7 @@ checkProofEqSimpB luids ruids ctx typ lhs rhs prf =
         Map ityp otyp ->
          andp (checkProofEq luids ruids ctx ityp a1 a2 prf)
               (chargs otyp stack1 stack2 prfs)
-        _ -> err "eq app/choice type mismatch"  -- needed in eg ALG269^3/ALG274^5
+        _ -> err "eq app/choice type mismatch"
     _ -> err "checkProofEqSimpB: arg list length mismatch"
   pickhead (HNLam{}) (HNLam{}) = FHLamLam
   pickhead (HNLam{}) _ = FHLamApp
@@ -491,7 +469,7 @@ eqElr _ _ = False
 
 elrType :: Context -> Elr -> (MType -> MetaEnv MPB) -> MetaEnv MPB
 elrType ctx (Var v) cont = case lookupVarType ctx v of
- Just t -> {-gheadp (False, prioUnknownInferredType, Nothing) (pbc "elrType") t $ \t -> -} cont t
+ Just t -> cont t
  Nothing -> err "elrType: var not in scope"
 elrType _ (Glob gv) cont = cont $ gvType gv
 
@@ -556,9 +534,9 @@ checkForm ctx typ form =
         (gg typ atyp args))
  where
   gg typ ityp args =
-   gheadp (True, prioCheckFormArgs, Nothing{-Just (BICheckFormArgs ityp)-}) (pbc "checkFormArgs") args $ \args -> case args of
+   gheadp (True, prioCheckFormArgs, Nothing) (pbc "checkFormArgs") args $ \args -> case args of
     ArgNil ->
-     checkEqType (NotM typ) ityp  -- if cheq typ ityp then (if atomicType typ then ok else err "checkForm: App typ not atomic") else err "checkForm: typ != ityp"
+     checkEqType (NotM typ) ityp
     ArgCons a as ->
      gheadp (False, prioUnknownType, Nothing) (pbc "checkForm.gg") ityp $ \ityp -> case ityp of
       Map t1 t2 -> andp (checkForm ctx t1 a) (gg typ t2 as)
@@ -572,8 +550,4 @@ checkType typ =
   Ind{} -> ok
   Map t1 t2 -> andp (checkType t1) (checkType t2)
 
-{-
-atomicType (Map{}) = False
-atomicType _ = True
--}
 

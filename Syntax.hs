@@ -8,13 +8,11 @@ import NarrowingSearch
 data Blk = BIEnv [GlobHyp]
          | BICtx Context
          | BIForm HNFormula
-         | BIUnifyForm [Int] HNFormula Env{- [CFormula]-}
+         | BIUnifyForm [Int] HNFormula Env
          | BIUnifyType Type
-         | BICheckForm {-Context -}Type
---         | BICheckFormArgs Type
+         | BICheckForm Type
          | BIComputed
---         | BICheckProofEq Type
-         | BISimpArgs Bool  -- shoud be cons (else nil)
+         | BISimpArgs Bool  -- shoud be cons (otherwise nil)
          | BICompTraceValue CompTrace
          | BIFormHead FormHead
 
@@ -28,9 +26,7 @@ instance Show Blk where
  show (BIUnifyForm{}) = "BIUnifyForm"
  show (BIUnifyType{}) = "BIUnifyType"
  show (BICheckForm{}) = "BICheckForm"
--- show (BICheckFormArgs{}) = "BICheckFormArgs"
  show (BIComputed{}) = "BIComputed"
--- show (BICheckProofEq{}) = "BICheckProofEq"
 
 data GenCost = GCStop
              | GCSubProb Int GenCost
@@ -95,7 +91,6 @@ data GlobVar = GlobVar {gvName :: String, gvType :: MType, gvId :: Int}
 
 data Proof = Intro MetaIntro MetaCompTrace
            | Elim MetaHyp MetaProofElim
---           | AC MetaType MetaFormula MetaProof MetaProofElim
            | RAA MetaProof
 type MetaProof = MMetavar Proof
 
@@ -176,16 +171,12 @@ type Context = [CtxExt]
 data CtxExt = VarExt MType
             | HypExt CFormula
 
---data Clos a = Cl Env a
-
 data CFormula = Cl Env MFormula
               | CApp CFormula CFormula  -- AC: MFormula MFormula, ExistsI: CFormula MFormula, ForallI: CFormula MFormula, ExistsE: CFormula CFormula, ForallE: CFormula MFormula
               | CNot CFormula
               | CHN HNFormula
 
 data CArgs = ClA Env MArgs
-
---data CCFormula = CC CFormula [CArgs]
 
 type Env = [EnvElt]
 data EnvElt = Skip
@@ -223,21 +214,8 @@ lift n (CHN f) =
             Glob g -> Glob g
   HNChoice muid typ qf args -> CHN $ HNChoice muid typ (lift n qf) (map (\(ClA env x) -> ClA (Lift n : env) x) args)
 
-{-
-cclift :: Int -> CCFormula -> CCFormula
-cclift 0 f = f
-cclift n (CC (Cl env f) xs) = CC (Cl (Lift n : env) f) (map g xs)
- where
-  g (Cl env x) = Cl (Lift n : env) x
--}
-
 sub :: CFormula -> CFormula -> CFormula
 sub sf (Cl (Skip : env) f) = Cl (Sub sf : env) f
-
-{-
-app :: CFormula -> CFormula -> CCFormula
-app (Cl env a) f = CC f [Cl env (NotM $ ArgCons a $ NotM ArgNil)]
--}
 
 doclos :: Env -> Int -> Either Int CFormula
 doclos = f 0

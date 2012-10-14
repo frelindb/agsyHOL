@@ -24,7 +24,7 @@ transformProb dosimpnegs ppr =
    xs -> map (\(i, x) -> (n ++ "_" ++ show i, x)) (zip [1..length xs] xs)
 
  trForm :: MFormula -> MFormula
- trForm f = (if dosimpnegs then simpnegs else id) {-$ etaexpand []-} f
+ trForm f = (if dosimpnegs then simpnegs else id) f
 
  splitproblem :: MFormula -> [MFormula]
  splitproblem x = f x
@@ -34,38 +34,6 @@ transformProb dosimpnegs ppr =
    f (NotM (C _ And [F t1, F t2])) = f t1 ++ f t2
    f e = [e]
 
-
-{-
-etaexpand ctx (NotM (C _ c [T (NotM t), Bind bdy])) | c == Forall || c == Exists || c == Lam = NotM $ C nu c [T (NotM t), Bind (etaexpand (t : ctx) bdy)]
-etaexpand ctx (NotM (App _ elr (NotM args))) = eta (elrtype elr) args
- where
- eta (Map _ to) (_ : args) = eta to args
- eta t [] = abss t []
- abss (Map ti to) ectx = NotM $ C nu Lam [T (NotM ti), Bind (abss to (ti : ectx))]
- abss _ ectx =
-  let NotM (App _ elr' (NotM args')) = dlift (length ectx) (NotM $ App nu elr (NotM $ map (etaexpand ctx) args))
-  in  NotM $ App nu elr' (NotM $ args' ++ map (\i -> etaexpand (ectx ++ ctx) (NotM $ App nu (Var i) (NotM []))) (reverse [0..length ectx - 1]))
- elrtype (Var v) = ctx !! v
- elrtype (Glob gv) = gvType gv
-etaexpand ctx (NotM (C _ c args)) = NotM $ C nu c (map gg args)
- where
-  gg (F f) = F $ etaexpand ctx f
-  gg a@(T{}) = a
-etaexpand _ x = error "etaexpand"
--}
-
-{-
-removenegs :: MFormula -> MFormula
-removenegs = f
- where
-  f (NotM (C _ Not [F (NotM (C _ Not [F x]))])) = f x
-  f (NotM (C _ c xs)) = NotM $ C nu c $ map g xs
-   where
-    g (F x) = F $ f x
-    g (Bind x) = Bind $ f x
-    g x@(T{}) = x
-  f (NotM (App _ elr args)) = NotM $ App nu elr $ map f args
--}
 
 simpnegs :: MFormula -> MFormula
 simpnegs x =
@@ -85,12 +53,6 @@ simpnegs x =
          choose [(cexists t nx, wnx),
                  (cnot (cforall t px), wpx + 10)])
   f (NotM (C _ Exists [T t, F (NotM (Lam _ _ x))])) = f (cnot (cforall t (cnot x)))
-{-
-    let ((px, wpx), (nx, wnx)) = f x
-    in  (choose (cexists t px, wpx)
-                (cnot (cforall t nx), wnx + 10),
-         choose (cforall t nx, wnx)
-                (cnot (cexists t px), wpx + 10))-}
   f (NotM (C _ Or [F x, F y])) =
     let ((px, wpx), (nx, wnx)) = f x
         ((py, wpy), (ny, wny)) = f y
@@ -119,27 +81,6 @@ choose ((x, n) : xs) = g x n xs
   g x n [] = (x, n)
   g x n ((y, m) : xs) = if m < n then g y m xs else g x n xs
 
-{-
-
- f atom = atom : 0, not atom : 1
- f (forall x) =
-  let (x1 : n1, x2 : n2) = f x
-  in  (forall x1 : n1 | not (exist x2) : n2 + 1, exist x2 : n2 | not (forall x1) : n1 + 1 )
- f (not x) =
-  let (x1 : n1, x2 : n2) = f x
-{-  in  (case x1 of {not x1' -> x1' : n1 - 1, _ -> not x1 : n1 + 1} | x2 : n2,
-       case x2 of {not x2' -> x2' : n2 - 1, _ -> not x2 : n2 + 1} | x1 : n1)-}
-  in  (not x1 : n1 + 1 | x2 : n2,
-       not x2 : n2 + 1 | x1 : n1)
- f (and x y) =
-  let (x1 : nx1, x2 : nx2) = f x
-      (y1 : ny1, y2 : ny2) = f y  
-  in  (and x1 y1 : nx1 + ny1 |
-       not (or x2 y2) : 1 + nx2 + ny2 |
-       not (imply x1 y2) :,
-       or x2 y2 : nx2 + ny2 |
-       not (and x1 y1) : 1 + nx1 + ny1)
--}
 
 -- -------------------------
 

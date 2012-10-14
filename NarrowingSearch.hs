@@ -1,7 +1,5 @@
 {-# LANGUAGE UndecidableInstances, Rank2Types, ExistentialQuantification, MultiParamTypeClasses, FunctionalDependencies, FlexibleInstances, ScopedTypeVariables #-}
 
--- An adaptation of chol/NarrowingSearch4.hs
-
 module NarrowingSearch where
 
 import Prelude hiding (fail)
@@ -26,7 +24,6 @@ data Metavar a blk = Metavar
  {mid :: Int,
   mbind :: IORef (Maybe a),
   mprincpres :: IORef Bool,
---  mmaxprio :: IORef Int,
   mbinfos :: IORef [blk],
   mobs :: IORef [(Maybe (IORef Bool), MetaEnv (PB blk), Node (Prio, AnyMeta blk), IO String)]
  }
@@ -44,10 +41,9 @@ newMeta :: Int -> IO (Metavar a blk)
 newMeta id = do
  x1 <- newIORef Nothing
  x2 <- newIORef False
--- x3 <- newIORef (-1)
  x4 <- newIORef []
  x5 <- newIORef []
- return $ Metavar {mid = id, mbind = x1, mprincpres = x2, {-mmaxprio = x3, -}mbinfos = x4, mobs = x5}
+ return $ Metavar {mid = id, mbind = x1, mprincpres = x2, mbinfos = x4, mobs = x5}
 
 initMeta :: IO (Metavar a blk)
 initMeta = do
@@ -93,17 +89,6 @@ gheadc x f = case x of
    Just x -> f x
    Nothing -> return $ Blocked m (gheadc x f)
 
-{-
-mmmcase :: Refinable a blk => MM a blk -> MetaEnv (MB b blk) -> (a -> MetaEnv (MB b blk)) -> MetaEnv (MB b blk)
-mmmcase x fm f = case x of
- NotM x -> f x
- Meta m -> do
-  bind <- readIORef $ mbind m
-  case bind of
-   Just x -> f x
-   Nothing -> fm
--}
-
 gheadp :: Refinable a blk => BlkInfo blk -> IO String -> MM a blk -> (a -> MetaEnv (PB blk)) -> MetaEnv (PB blk)
 gheadp blkinfo pr x f = case x of
  NotM x -> f x
@@ -121,12 +106,6 @@ gheadm blkinfo pr m f = do
   Nothing -> return $ PBlocked m blkinfo (gheadm (error "not used") (error "not used") m f) pr  -- blkinfo not needed because will be notb next time
 
 
-{-
-doubleblock :: (Refinable a blk, Refinable b blk) => MM a blk -> MM b blk -> MetaEnv (PB blk) -> MetaEnv (PB blk)
-doubleblock (Meta m1) (Meta m2) cont = return $ PDoubleBlocked m1 m2 cont
-doubleblock _ _ _ = impossible
--}
-
 cheadc :: MetaEnv (MB a blk) -> (a -> MetaEnv (MB b blk)) -> MetaEnv (MB b blk)
 cheadc x f = do
  x' <- x
@@ -140,21 +119,11 @@ cheadp blkinfo pr x f = do
  x' <- x
  case x' of
   NotB x -> f x
-  -- Blocked m x -> return $ PBlocked m (True{-False-}, prio, bi) (cheadp (prio, bi) pr x f) pr
   Blocked m x -> return $ PBlocked m (False, prio, bi) (cheadp (prio, bi) pr x f) pr  -- enabled princ pres again
    where
     (prio, bi) = blkinfo
   Failed msg -> return $ NotPB $ Error msg
 
-{-
-mmbpcase :: MetaEnv (MB a blk) -> (forall b . Refinable b blk => MM b blk -> MetaEnv (PB blk)) -> (a -> MetaEnv (PB blk)) -> MetaEnv (PB blk)
-mmbpcase x fm f = do
- x' <- x
- case x' of
-  NotB x -> f x
-  Blocked m x -> fm (Meta m)
-  Failed msg -> return $ NotPB $ Error msg
--}
 
 mbret :: a -> MetaEnv (MB a blk)
 mbret x = return $ NotB x
@@ -175,24 +144,6 @@ expandbind x = case x of
    Nothing -> return x
 
 -- -----------------------
-{-
-max_computation_steps :: Int
-max_computation_steps = 200
-
-possibly_nonterminating_step :: String -> ((MetaEnv (MB b blk) -> MetaEnv (MB b blk)) -> MetaEnv (MB b blk)) -> MetaEnv (MB b blk)
-possibly_nonterminating_step errmsg x = do
- cnt <- newIORef max_computation_steps
- let
-  r x = do
-   c <- readIORef cnt
-   if c == 0 then
-     fail $ "possible nontermination: " ++ errmsg
-    else do
-     NoUndo.writeIORef cnt $! c - 1
-     x
- x r
--}
--- -----------------------
 
 runProp :: MProp blk -> IO String
 runProp p = do
@@ -209,21 +160,6 @@ runProp p = do
      return $ "(" ++ p1 ++ ") & (" ++ p2 ++ ")"
     Cost _ p -> runProp p
 
-{-
-prop2bool :: MetaEnv (PB blk) -> MetaEnv (MB Bool blk)
-prop2bool x = do
- x <- x
- case x of
-  NotPB x -> case x of
-   OK -> mbret True
-   Error{} -> mbret False
-   And x y ->
-    mbcase (prop2bool x) $ \x -> case x of
-     True -> prop2bool y
-     False -> mbret False
-  PBlocked m _ x -> return $ Blocked m (prop2bool x)  -- throwing away blockinfo
-  PDoubleBlocked m1 _ x -> return $ Blocked m1 (prop2bool x)  -- blocking on first meta
--}
 -- -----------------------
 
 ok = mpret OK
@@ -246,11 +182,10 @@ type HandleSol = IO ()
 lowestPrio = 0
 highestPrio = 7
 
--- NOTE: ticks is counted down instead of up and execution stopped when 0 is reached
+-- NOTE: ticks are counted down instead of up and execution stopped when 0 is reached
 topSearch :: forall blk . Bool -> IORef Int -> IORef Int -> HandleSol -> blk -> MetaEnv (PB blk) -> Int -> Int -> IO Bool
 topSearch interactive ticks nsol hsol envinfo p searchdepth depthinterval = do
  conslist <- empty :: IO (DLList (Prio, AnyMeta blk))
--- is <- replicateM (highestPrio - lowestPrio + 1) (newIORef 0)
  depthreached <- newIORef False
  stop <- newIORef False
  midcp <- newIORef 1
@@ -258,9 +193,6 @@ topSearch interactive ticks nsol hsol envinfo p searchdepth depthinterval = do
  depth <- newIORef searchdepth
 
  let
---  prioarr :: Array Prio (IORef Int)
---  prioarr = listArray (lowestPrio, highestPrio) is
-
   r :: forall a . Int -> Undo ()
 
   r ddepth | ddepth == 100000 = {-lift (putStr "inf?"{-putStrLn "narrsearch infinite rec depth?"-}) >> lift hsol >> {-error "narrsearch infinite rec depth?"-}-} return ()
@@ -277,7 +209,6 @@ topSearch interactive ticks nsol hsol envinfo p searchdepth depthinterval = do
         n <- readIORef nsol
         when (n == 1) $ NoUndo.writeIORef stop True
         NoUndo.writeIORef nsol $! n - 1
-        --putStr "solution: "
         hsol
         when interactive $ getChar >> return ()
       False -> error "no principal constraints"
@@ -369,11 +300,9 @@ topSearch interactive ticks nsol hsol envinfo p searchdepth depthinterval = do
     f i vms = do
      (am, i) <- getNext i
      case am of
-      Just (prio, m@(AnyMeta{})) | True {-all (\m' -> not (eq m m')) vms-} -> do
+      Just (prio, m@(AnyMeta{})) -> do
        prMeta i (prio, m)
        f i (m : vms)
-                       | otherwise ->
-       f i vms
       Just (_, NoMeta) -> do
        f i vms
       Nothing -> return ()
@@ -381,7 +310,6 @@ topSearch interactive ticks nsol hsol envinfo p searchdepth depthinterval = do
 
   prMeta node (prio, AnyMeta m) = do
    pp <- readIORef (mprincpres m)
---   prio <- readIORef (mmaxprio m)
    blinfos <- readIORef (mbinfos m)
    obss <- readIORef (mobs m)
    putStr $ "?" ++ show (mid m) ++ " -  pp: " ++ show pp ++ ", prio: " ++ show prio ++ " - "
@@ -399,8 +327,7 @@ topSearch interactive ticks nsol hsol envinfo p searchdepth depthinterval = do
     f i max = do
      (am, i) <- getNext i
      case am of
-      Just (prio, am@(AnyMeta m)) ->{- do
-       prio <- readIORef (mmaxprio m)-}
+      Just (prio, am@(AnyMeta m)) ->
        case max of
         Nothing -> f i (Just (prio, am))
         Just (mprio, _) ->
@@ -413,37 +340,6 @@ topSearch interactive ticks nsol hsol envinfo p searchdepth depthinterval = do
        case max of
         Nothing -> return Nothing
         Just x -> return $ Just x
-
-{-
-  findrefmeta :: Undo (Maybe (AnyMeta blk))
-  findrefmeta = r highestPrio
-   where
-    r prio = do
-     c <- ureadIORef (prioarr ! prio)
-     case c of
-      0 -> if prio == lowestPrio then
-            return Nothing
-           else
-            r (prio - 1)
-      _ -> do
-       umodifyIORef (prioarr ! prio) (\x -> x - 1)
-       lift $ f (initVisit conslist)
-       where
-        f i = do
-         (Just am, i) <- getNext i
-         case am of
-          (mprio, am@(AnyMeta m)) -> do
-           princ <- readIORef (mprincpres m)
-           if princ then{- do
-             mprio <- readIORef (mmaxprio m)-}
-             if mprio == prio then
-               return $ Just am
-              else
-               f i
-            else
-             f i
-          NoMeta -> f i
--}
 
   checknoconstraintsleft = do
    (x, _) <- getNext $ initVisit conslist
@@ -482,8 +378,6 @@ topSearch interactive ticks nsol hsol envinfo p searchdepth depthinterval = do
      case res of
       NotPB p -> case p of
        OK -> return True
-       --Error{} -> return False
-       --Error "computation failed" -> lift hsol >> error "stopped"
        Error{} | not interactive -> return False
        Error msg | interactive -> do
         lift (putStrLn msg >> getChar)
@@ -503,43 +397,15 @@ topSearch interactive ticks nsol hsol envinfo p searchdepth depthinterval = do
           uwriteIORef depth (depth_ - c)
           f (fdep + 1) p
       PBlocked m (princ, prio, mbinfo) cont pr -> do
---       lift $ putStrLn ("insert: " ++ show (mid m, prio)) >> getChar
-       node <- insertBefore (prio, {-if princ then -}AnyMeta m{- else NoMeta-}) iptr  -- ?? or not take princ into account?
+       node <- insertBefore (prio, AnyMeta m) iptr
        umodifyIORef (mobs m) ((Nothing, cont, node, pr) :)
        case mbinfo of
         Just i -> umodifyIORef (mbinfos m) (i :)
         Nothing -> return ()
        oprinc <- ureadIORef (mprincpres m)
---       oprio <- ureadIORef (mmaxprio m)
 
        when (not oprinc && princ) $ uwriteIORef (mprincpres m) True
 
-{-
-       if oprinc then
-         when (prio > 0) $ uwriteIORef (mmaxprio m) (oprio + prio)
-        else
-         if princ then do
-          uwriteIORef (mprincpres m) True
-          when (prio > 0) $ uwriteIORef (mmaxprio m) (oprio + prio)
-         else
-          when (prio > 0) $ uwriteIORef (mmaxprio m) (oprio + prio)
--}
-{-
-       if oprinc then
-         when (prio > oprio) $ do
-           uwriteIORef (mmaxprio m) prio
-           umodifyIORef (prioarr ! oprio) (\x -> x - 1)
-           umodifyIORef (prioarr ! prio) (+ 1)
-        else
-         if princ then do
-          uwriteIORef (mprincpres m) True
-          when (prio > oprio) $
-            uwriteIORef (mmaxprio m) prio
-          umodifyIORef (prioarr ! max oprio prio) (+ 1)
-         else
-          when (prio > oprio) $
-            uwriteIORef (mmaxprio m) prio
--}
        return True
       PDoubleBlocked m1 m2 cont -> do
        node <- insertBefore ((-1), NoMeta) iptr

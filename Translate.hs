@@ -12,7 +12,7 @@ import PrintProof
 
 data TrState = TrState {trsIndSets :: Map String Int,
                         trsGlobVars :: Map String GlobVar,
-                        trsDefinitions :: Map String T.Form{-MFormula-},
+                        trsDefinitions :: Map String T.Form,
                         trsGlobHyps :: Map String GlobHyp,
                         trsConjectures :: [(String, MFormula)]}
 
@@ -30,7 +30,6 @@ trdecl (T.ThfAnnotated _ T.Type (T.Typed (T.Const name) typ) T.NoAnnotation) = d
  typ <- trtype (error $ "not in a conjecture, in " ++ name) typ
  modify $ \st -> st {trsGlobVars = Map.insert name (GlobVar {gvName = name, gvType = typ, gvId = Map.size (trsGlobVars st)}) (trsGlobVars st)}
 trdecl (T.ThfAnnotated _ T.Definition (T.Bin T.Equal (T.Const name) form) T.NoAnnotation) = do
- -- form <- trform (error $ "not in a conjecture, in " ++ name) [] form
  modify $ \st -> st {trsDefinitions = Map.insert name form (trsDefinitions st)}
 trdecl (T.ThfAnnotated name role form T.NoAnnotation) | role `elem` [T.Axiom, T.Lemma, T.Hypothesis] = do
  form <- trform (error $ "not in a conjecture, in " ++ name) [] form
@@ -124,38 +123,13 @@ trform cname = f
     return $ NotM $ Lam nu t vsx
    T.DefType "true" -> return $ NotM $ C nu Top []
    T.DefType "false" -> return $ NotM $ C nu Bot []
-{-
-   x -> do
-    x <- trterm ctx x
-    return $ etaexpand (map snd ctx) x
-    where
-    etaexpand ctx (NotM (C _ Lam [T (NotM t), Bind bdy])) = NotM $ C nu Lam [T (NotM t), Bind (etaexpand (t : ctx) bdy)]
-    etaexpand ctx (NotM (App _ elr args)) = eta (elrtype elr) args
-     where
-     eta (Map _ to) (_ : args) = eta to args
-     eta t [] = abss t []
-     abss (Map ti to) ectx = NotM $ C nu Lam [T (NotM ti), Bind (abss to (ti : ectx))]
-     abss _ ectx =
-      let NotM (App _ elr' args') = dlift (length ectx) (NotM $ App nu elr args)
-      in  NotM $ App nu elr' (args' ++ map (\i -> etaexpand (ectx ++ ctx) (NotM $ App nu (Var i) [])) (reverse [0..length ectx - 1]))
-     elrtype (Var v) = ctx !! v
-     elrtype (Glob gv) = gvType gv
-    etaexpand _ x = x
-
-    trterm ctx x = case x of
-     T.Quant _ [] x -> trterm ctx x
-     T.Quant T.LambdaAbs ((v,Just t):vs) x -> do
-      t <- trtype cname t
-      vsx <- trterm ((v, t) : ctx) (T.Quant T.LambdaAbs vs x)
-      return $ NotM $ C nu Lam [T (NotM t), Bind vsx]
--}
    T.Var v ->
     return $ NotM $ App nu (Var (idxof v ctx)) (NotM ArgNil)
    T.Const v -> do
     defs <- gets trsDefinitions
     case Map.lookup v defs of
      Just d ->
-      trform v [] d{-return d-}
+      trform v [] d
      Nothing -> do
       gvars <- gets trsGlobVars
       return $ NotM $ App nu (Glob (gvars !!! v)) (NotM ArgNil)
@@ -167,7 +141,7 @@ trform cname = f
       return $ dsub x2 bdy
      NotM (App _ elr args) ->
       return $ NotM $ App nu elr (argSnoc args x2)
-     NotM (C _ c as) -> error $ "trform.App: " ++ show (""{-cname-}, c, length as)
+     NotM (C _ c as) -> error $ "trform.App: " ++ show ("", c, length as)
    _ -> error $ "trform: " ++ show (cname, x)
 
 argSnoc xs y = argsConcat xs (NotM $ ArgCons y $ NotM ArgNil)
@@ -240,7 +214,6 @@ dsub s = rr 0
    C _ c args -> NotM $ C nu c (map ra args)
     where
      ra (F f) = F $ rr i f
---     ra (Bind f) = Bind $ rr (i + 1) f
      ra a@(T{}) = a
    App _ elr args ->
     case elr of
@@ -278,7 +251,6 @@ dlift i = rr 0
    C _ c args -> C nu c (map ra args)
     where
      ra (F f) = F $ rr j f
---     ra (Bind f) = Bind $ rr (j + 1) f
      ra a@(T{}) = a
    App _ elr args ->
     case elr of

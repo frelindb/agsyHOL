@@ -47,30 +47,3 @@ data Token =
  | TKstring String
  | TKEOF
 
-{-
-   TKoparen
- | TKcparen
- | TKosquare
- | TKcsquare
- | TKocurly
- | TKccurly
- | TKcolon
- | TKsemicolon
- | TKstar
- | TKstarquestion
- | TKrarrow 
- | TKlambda
- | TKquestion
- | TKequal
- | TKdot
- | TKdollar
- | TKhash
- | TKprocent
- | TKdata
- | TKcase
- | TKmutual
- | TKpostulate
- | TKname String
- | TKnumber Int
- | TKEOF
--}

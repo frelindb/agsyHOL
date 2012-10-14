@@ -8,21 +8,11 @@ import Syntax
 import Check
 import Translate
 
--- TODO:
---  ok give formula in ?'-I and ?'-E, by adding to proof terms or passing around goal and context in proofExport (added info to proof terms)
-
---  * evaluates too much sometimes (for forall and exists e.g.). This is just a performance problem in itself.
---     not evaluate too much because of forall and exists anymore, but maybe because of how no of reductions are counted
---  * sometimes when evaluates too much, equality gets evaluated which means it does not match unevaluated equality
---    have done what seems to be a solution to this, but not changed in all places necessary
---    have disabled to fix now to see if problem still arises
-
 chunksize = 5
 multiplefiles = True
 
 
 data ECtxElt = Vr MType | Hp CFormula
--- deriving Show
 type ECtx = [ECtxElt]
 
 agdaProof :: Problem -> MetaProof -> IO ()
@@ -76,11 +66,10 @@ agdaProof prob proof = do
      case elr of
       HVar v -> return (pre ++ prHypVar ctx v, "", ityp)
       HGlob gh -> return (pre ++ prGHypVar ctx (ghName gh) ++"{- " ++ fixname (ghName gh) ++ " -}", "", ityp)
-      AC typ qf p -> do
-       --typ <- eType $ Meta typ
+      AC _ qf p -> do
        qf <- eForm ctx $ Meta qf
        p <- eProof ctx (error "AC etyp") p
-       return (preac ++ {- "{" ++ typ ++ "} " ++ -} "(!-E " ++ qf ++ " (=>-E " ++ p, "))", ityp)
+       return (preac ++ "(!-E " ++ qf ++ " (=>-E " ++ p, "))", ityp)
    where
     pre = if eqp then "step _ _ " else "elim "
     preac = if eqp then "step-ac' _ _ " else "ac' "
@@ -136,7 +125,7 @@ agdaProof prob proof = do
        writeIORef xx (lhs', rhs')
        prMeta ctr $ \(CompTrace ctr) ->
         condWrap (ctr > 0) ("(hn-ante-eq " ++ show ctr ++ " _ _ _ ") ")" $
-        return "use"  -- "(use refl)"
+        return "use"
       UseEqSym ctr -> do
        HNC _ Eq [_, F lhs', F rhs'] <- headnormalize ityp
        writeIORef xx (rhs', lhs')
@@ -180,9 +169,8 @@ agdaProof prob proof = do
      let HNC _ And [_, F typ] = ityp
      p <- pr typ p
      return $ "(&-E-r " ++ p ++ ")"
-    ExistsE cf p -> do
+    ExistsE _ p -> do
      _ <- ticksize 2
-     --cf <- normalize cf >>= eForm ctx
      let HNC _ Exists [T typ, F cf@(Cl env mf)] = ityp
          ityp' = CApp cf (Cl env $ NotM $ Choice nu typ mf (NotM ArgNil))
      p <- pr ityp' p
@@ -232,9 +220,8 @@ agdaProof prob proof = do
      p1 <- eProof ctx typ1 p1
      p2 <- eProof ctx typ2 p2
      return $ "(&-I " ++ p1 ++ " " ++ p2 ++ ")"
-    ExistsI cf f p -> do
+    ExistsI _ f p -> do
      _ <- ticksize 2
-     --cf <- normalize cf >>= eForm ctx
      let HNC _ Exists [T typ, F cf] = etyp
          etyp' = CApp cf (cl (Meta f))
      f <- eForm ctx $ Meta f
@@ -359,14 +346,6 @@ agdaProof prob proof = do
       p <- eProofEq ctx (NotM $ Map qtyp typ) lqf rqf p
       return $ "(head-~ (simp (head-app _ _ _ _ _ _ (simp (head-const _ Π)) (simp (head-lam _ _ _ _ (simp (head-~ (simp (head-app _ _ _ _ _ _ " ++ p ++ " (simp (head-var _ _ _)))))))))))"
       -- TODO: how to handle the 'weak F' in the def of '?'[_]_' ? Need to keep track of it or solved because var indeces are not explicit?
- {-
-      prMeta p $ \p -> case p of
-       Simp (Comp p _ _) ->
-        prMeta p $ \p -> case p of
-         SimpLam _ p -> do
-          p <- eProofEq (Vr : ctx) p
-          return $ "(head-~ (simp (head-app _ _ _ _ _ _ (simp (head-const _ Π)) (simp (head-lam _ _ _ _ (simp (head-~ " ++ p ++ ")))))))"
- -}
      SimpCons Eq [p1, p2] -> do
       let HNC _ Eq [T qtyp, F llhs, F rlhs] = lhs
           HNC _ Eq [_, F lrhs, F rrhs] = rhs
@@ -410,10 +389,6 @@ agdaProof prob proof = do
  writeFile ("Proof-" ++ prName prob ++ ".agda") $
   "module Proof-" ++ prName prob ++ " where\n" ++
   "\n" ++
-{-
-  "open import Data.Fin\n" ++
-  "open import Relation.Binary.PropositionalEquality\n" ++
--}
   "open import StdLibStuff\n" ++
   "\n" ++
   "open import Syntax\n" ++
@@ -525,25 +500,11 @@ agdaProof prob proof = do
       t <- eType t
       a <- eForm ctx a
       return $ "(!'[ " ++ t ++ " ] " ++ a ++ ")"
-{-
-     expandbind a >>= \a -> case a of
-      NotM (Lam _ _ bdy) -> do
-       t <- eType t
-       bdy <- eForm (Vr : ctx) bdy
-       return $ "(![ " ++ t ++ " ] " ++ bdy ++ ")"
--}
     NotM (C _ Exists [T t, F a]) ->
      do
       t <- eType t
       a <- eForm ctx a
       return $ "(?'[ " ++ t ++ " ] " ++ a ++ ")"
-{-
-     expandbind a >>= \a -> case a of
-      NotM (Lam _ _ bdy) -> do
-       t <- eType t
-       bdy <- eForm (Vr : ctx) bdy
-       return $ "(?[ " ++ t ++ " ] " ++ bdy ++ ")"
--}
     NotM (C _ Eq [T _, F lhs, F rhs]) -> do
      lhs <- eForm ctx lhs
      rhs <- eForm ctx rhs
@@ -558,13 +519,6 @@ agdaProof prob proof = do
       typ <- eType typ
       qf <- eForm ctx qf
       wrapArgs ("(ι' (" ++ typ ++ ") " ++ qf ++ ")") args
-{-
-     expandbind qf >>= \qf -> case qf of
-      NotM (Lam _ _ qf) -> do
-       typ <- eType typ
-       qf <- eForm (Vr : ctx) qf
-       wrapArgs ("(ι " ++ typ ++ " " ++ qf ++ ")") args
--}
    where
     wrapArgs :: String -> MArgs -> IO String
     wrapArgs c xs =
@@ -606,25 +560,11 @@ agdaProof prob proof = do
       t <- eType t
       a <- eCForm ctx (Cl env a)
       return $ "(!'[ " ++ t ++ " ] " ++ a ++ ")"
-{-
-     expandbind a >>= \a -> case a of
-      NotM (Lam _ _ bdy) -> do
-       t <- eType t
-       bdy <- eForm (Vr : ctx) bdy
-       return $ "(![ " ++ t ++ " ] " ++ bdy ++ ")"
--}
     NotM (C _ Exists [T t, F a]) ->
      do
       t <- eType t
       a <- eCForm ctx (Cl env a)
       return $ "(?'[ " ++ t ++ " ] " ++ a ++ ")"
-{-
-     expandbind a >>= \a -> case a of
-      NotM (Lam _ _ bdy) -> do
-       t <- eType t
-       bdy <- eForm (Vr : ctx) bdy
-       return $ "(?[ " ++ t ++ " ] " ++ bdy ++ ")"
--}
     NotM (C _ Eq [T _, F lhs, F rhs]) -> do
      lhs <- eCForm ctx (Cl env lhs)
      rhs <- eCForm ctx (Cl env rhs)
@@ -641,13 +581,6 @@ agdaProof prob proof = do
       typ <- eType typ
       qf <- eCForm ctx (Cl env qf)
       wrapArgs ("(ι' (" ++ typ ++ ") " ++ qf ++ ")") args
-{-
-     expandbind qf >>= \qf -> case qf of
-      NotM (Lam _ _ qf) -> do
-       typ <- eType typ
-       qf <- eForm (Vr : ctx) qf
-       wrapArgs ("(ι " ++ typ ++ " " ++ qf ++ ")") args
--}
    where
     wrapArgs :: String -> MArgs -> IO String
     wrapArgs c xs =

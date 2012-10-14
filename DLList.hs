@@ -3,7 +3,6 @@ module DLList where
 import Data.IORef (IORef, newIORef, readIORef)
 import qualified Data.IORef as NoUndo (writeIORef)
 
---import Control.Monad.State (lift)
 
 import Undo
 
@@ -61,25 +60,4 @@ toList x = f $ initVisit x
      elts <- f i
      return $ elt : elts
 
-{-
-test = do
- l <- empty
- let sh = lift $ do
-      xs <- toList l
-      putStrLn $ show xs
- runUndo $ do
-  let i = insertLast l
-  insertBefore 1 i
-  insertBefore 2 i
-  insertBefore 3 i
-  sh
-  let i = initVisit l
-  (Just 1, i) <- lift $ getNext i
-  (Just 2, i) <- lift $ getNext i
-  i <- remove i
-  sh
-  insertBefore 4 i
-  insertBefore 5 i
-  sh
--}
 

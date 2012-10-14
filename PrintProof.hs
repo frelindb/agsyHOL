@@ -25,12 +25,6 @@ prProof ctx p =
   RAA p -> do
    p <- prProof (ctx + 1) p
    return $ "(RAA (\\#" ++ show ctx ++ "." ++ p ++ "))"
-{-  AC typ qf p pe -> do
-   typ <- prType $ Meta typ
-   qf <- prForm (ctx {-+ 1-}) $ Meta qf
-   p <- prProof ctx p
-   pe <- prProofElim ctx pe
-   return $ "(AC " ++ typ ++ " " ++ qf ++ " " ++ p ++ " " ++ pe ++ ")"-}
 
 prIntro :: Int -> MetaIntro -> IO String
 prIntro ctx p =
@@ -72,7 +66,7 @@ prHyp ctx hyp =
   HGlob gh -> return $ ghName gh
   AC typ qf p -> do
    typ <- prType $ Meta typ
-   qf <- prForm (ctx {-+ 1-}) $ Meta qf
+   qf <- prForm ctx $ Meta qf
    p <- prProof ctx p
    return $ "(AC " ++ typ ++ " " ++ qf ++ " " ++ p ++ ")"
 
@@ -201,15 +195,11 @@ prForm ctx f =
   NotM (C muid c args) -> do
    args <- mapM (\arg -> case arg of
      F f -> prForm ctx f >>= \f -> return $ f
---     Bind f -> prForm (ctx + 1) f >>= \f -> return $ "(\\#" ++ show ctx ++ "." ++ f ++ ")"
      T t -> prType t >>= \t -> return $ t
     ) args
    return $ "(" ++ show c ++ pmuid muid ++ concat (map (" " ++) args) ++ ")"
   NotM (App muid elr args) -> do
    args <- prArgs ctx args
-{- args <- expandbind args >>= \args -> case args of 
-               Meta m -> return $ "?" ++ show (mid m)
-               NotM args -> liftM (concat . map (" " ++)) (mapM (prForm ctx) args)-}
    let pelr = case elr of
               Var i -> "#" ++ show (ctx - i - 1)
               Glob gv -> gvName gv
@@ -217,16 +207,11 @@ prForm ctx f =
 
   NotM (Choice muid typ qf args) -> do
    typ <- prType typ
-   qf <- prForm (ctx{- + 1-}) qf
+   qf <- prForm ctx qf
    args <- prArgs ctx args
-{- args <- expandbind args >>= \args -> case args of 
-               Meta m -> return $ "?" ++ show (mid m)
-               NotM args -> liftM (concat . map (" " ++)) (mapM (prForm ctx) args)-}
    return $ "(choice" ++ pmuid muid ++ " " ++ typ ++ " " ++ qf ++ args ++ ")"
  where
   pmuid _ = ""
-  {-pmuid Nothing = ""
-  pmuid (Just uid) = "_" ++ show uid-}
 
 prArgs :: Int -> MArgs -> IO String
 prArgs ctx xs =
@@ -283,7 +268,6 @@ prCFormula ctx (Cl env form) =
   NotM (C muid c args) -> do
    args <- mapM (\arg -> case arg of
      F f -> prCFormula ctx (Cl env f) >>= \f -> return $ f
---     Bind f -> prCFormula (ctx + 1) (Cl (Skip : env) f) >>= \f -> return $ "(\\#" ++ show ctx ++ "." ++ f ++ ")"
      T t -> prType t >>= \t -> return $ t
     ) args
    return $ "(" ++ show c ++ pmuid muid ++ concat (map (" " ++) args) ++ ")"
@@ -299,13 +283,11 @@ prCFormula ctx (Cl env form) =
    return $ "(" ++ elr ++ pmuid muid ++ args ++ ")"
   NotM (Choice muid typ qf args) -> do
    typ <- prType typ
-   qf <- prCFormula (ctx{- + 1-}) (Cl env qf)
+   qf <- prCFormula ctx (Cl env qf)
    args <- prargs args
    return $ "(choice" ++ pmuid muid ++ " " ++ typ ++ " " ++ qf ++ args ++ ")"
  where
   pmuid _ = ""
-  {-pmuid Nothing = ""
-  pmuid (Just uid) = "_" ++ show uid-}
 
   prargs args =
    expandbind args >>= \args -> case args of 
@@ -351,11 +333,4 @@ prCtx ctx = g (length ctx - 1) ctx
    ctx <- g (i - 1) ctx
    f <- prCFormula i f
    return $ ctx ++ "[#" ++ show i ++ ":" ++ f ++ "]"
-
-{-
-prCCFormula :: Int -> CCFormula -> IO String
-prCCFormula ctx (CC f xs) = do
- f <- prCFormula ctx f
- return $ f ++ "<ccargs missing>"
--}
 
