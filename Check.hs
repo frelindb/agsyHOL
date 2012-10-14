@@ -8,8 +8,10 @@ import SearchControl
 import PrintProof
 
 
+type CompTrace = Int  -- number of reductions
+
 data CRes = CDone HNFormula CompTrace
-          | CBlocked CFormula [CArgs] Int  -- count so far (add when comptrace info was added)
+          | CBlocked CFormula [CArgs]
           | CFail
 
 computei :: Int -> Bool -> CFormula -> [CArgs] -> MetaEnv (MMB CRes)
@@ -17,27 +19,27 @@ computei 1000 _ _ _ = mbret CFail
 computei count fromlookup cf@(Cl env f) stack = do
  f <- expandbind f
  case f of
-  Meta m -> mbret $ CBlocked cf stack count
+  Meta m -> mbret $ CBlocked cf stack
   NotM f -> case f of
    App muid (Var v) args ->
     case doclos env v of
      Left v ->
-      mbret $ CDone (HNApp (gmuid muid) (Var v) (ClA env args : stack)) (CompTrace count)
+      mbret $ CDone (HNApp (gmuid muid) (Var v) (ClA env args : stack)) count
      Right sf ->
-      computei count True sf (ClA env args : stack)  -- changed (count + 1) to count when comptrace info was added
+      computei count True sf (ClA env args : stack)
    App muid elr@(Glob _) args ->
-    mbret $ CDone (HNApp (gmuid muid) elr (ClA env args : stack)) (CompTrace count)
+    mbret $ CDone (HNApp (gmuid muid) elr (ClA env args : stack)) count
    Choice muid typ bdy args ->
-    mbret $ CDone (HNChoice (gmuid muid) typ (Cl env bdy) (ClA env args : stack)) (CompTrace count)
+    mbret $ CDone (HNChoice (gmuid muid) typ (Cl env bdy) (ClA env args : stack)) count
    Lam muid typ bdy ->
     cheadc (getStackHead stack) $ \res -> case res of
      HNNil ->
-      mbret $ CDone (HNLam (gmuid muid) typ (Cl (Skip : env) bdy)) (CompTrace count)
+      mbret $ CDone (HNLam (gmuid muid) typ (Cl (Skip : env) bdy)) count
      HNCons arg stack ->
       computei (count + 1) False (sub arg (Cl (Skip : env) bdy)) stack
    C muid c args ->
     cheadc (getStackHead stack) $ \res -> case res of
-     HNNil -> mbret $ CDone (HNC (gmuid muid) c (map clca args)) (CompTrace count)
+     HNNil -> mbret $ CDone (HNC (gmuid muid) c (map clca args)) count
       where
        clca (F f) = F $ Cl env f
        clca (T t) = T t
@@ -47,15 +49,15 @@ computei count fromlookup cf@(Cl env f) stack = do
 computei count fromlookup (CApp f (Cl env a)) stack = computei count fromlookup f (ClA env (NotM $ ArgCons a $ NotM ArgNil) : stack)
 computei count fromlookup (CNot f) stack =
  cheadc (getStackHead stack) $ \res -> case res of
-  HNNil -> mbret $ CDone (HNC nu Not [F f]) (CompTrace count)
+  HNNil -> mbret $ CDone (HNC nu Not [F f]) count
   HNCons{} -> mbret CFail
 computei count fromlookup (CHN f) stack =
  case f of
-  HNApp muid elr args -> mbret $ CDone (HNApp (gmuid muid) elr (args ++ stack)) (CompTrace count)
-  HNChoice muid typ qf args -> mbret $ CDone (HNChoice (gmuid muid) typ qf (args ++ stack)) (CompTrace count)
+  HNApp muid elr args -> mbret $ CDone (HNApp (gmuid muid) elr (args ++ stack)) count
+  HNChoice muid typ qf args -> mbret $ CDone (HNChoice (gmuid muid) typ qf (args ++ stack)) count
   HNC{} ->
    cheadc (getStackHead stack) $ \res -> case res of
-    HNNil -> mbret $ CDone f (CompTrace count)
+    HNNil -> mbret $ CDone f count
     HNCons{} -> mbret CFail
  where
   gmuid muid = if fromlookup then Nothing else muid
@@ -71,15 +73,15 @@ getStackHead stack =
      mbret $ HNCons (Cl env arg) (ClA env args : stack)
 
 compute :: CFormula -> MetaEnv (MMB (HNFormula, CompTrace))
-compute f = gg f [] 0
+compute f = gg f []
  where
-  gg f stack count =
-   cheadc (computei count False f stack) $ \res ->
+  gg f stack =
+   cheadc (computei 0 False f stack) $ \res ->
    case res of
     CDone x y -> mbret (x, y)
-    CBlocked cf@(Cl _ f) stack count ->
+    CBlocked cf@(Cl _ f) stack ->
      gheadc f $ \_ ->
-     gg cf stack count
+     gg cf stack
     CFail -> NarrowingSearch.fail "computation failed"
 
 -- ----------------------
@@ -88,9 +90,8 @@ checkProof :: Context -> CFormula -> MetaProof -> MetaEnv MPB
 checkProof ctx form prf =
  getFormHead form $
  gheadm (True, prioProof, Nothing) (prCtx ctx >>= \pc -> prCFormula (length ctx) form >>= \pf -> return ("checkProof : " ++ pc ++ " : " ++ pf)) prf $ \prf -> case prf of
-  Intro prf pctr ->
-   cheadp (prioDecompFormUnknown, Just BIComputed) (pbc "checkProof.Intro") (compute form) $ \(form, ctr) ->
-   setCompTrace pctr ctr $
+  Intro prf ->
+   cheadp (prioDecompFormUnknown, Just BIComputed) (pbc "checkProof.Intro") (compute form) $ \(form, _) ->
    checkIntro ctx form prf
   Elim hyp prf ->
    checkHyp ctx hyp $ \focante ->
@@ -137,7 +138,7 @@ checkIntro ctx form prf =
     andp (checkProof ctx forml prfl)
          (checkProof ctx formr prfr)
    _ -> err "Pair : And"
-  ExistsI _ witness prf -> case form of
+  ExistsI witness prf -> case form of
    HNC _ Exists [T typ, F qf] ->
     andp (checkForm ctx typ (Meta witness))
          (checkProof ctx (CApp qf (cl (Meta witness))) prf)
@@ -174,9 +175,8 @@ checkProofElim ctx form focante prf =
       _ -> ok
     ) $
     checkProofEqSimp [] [] ctx typeBool form focante prf
-  ElimStep prf pctr ->
-   cheadp (prioDecompFormUnknown, Just BIComputed) (pbc "checkProofElim.ElimStep") (compute focante) $ \(focante, ctr) ->
-   setCompTrace pctr ctr $
+  ElimStep prf ->
+   cheadp (prioDecompFormUnknown, Just BIComputed) (pbc "checkProofElim.ElimStep") (compute focante) $ \(focante, _) ->
    checkElimStep ctx form focante prf
 
 checkElimStep :: Context -> CFormula -> HNFormula -> MetaElimStep -> MetaEnv MPB
@@ -201,23 +201,22 @@ checkElimStep ctx form focante prf =
 checkProofEqElim :: Context-> MType -> (CFormula -> CFormula -> MetaEnv MPB) -> CFormula -> MetaProofEqElim -> MetaEnv MPB
 checkProofEqElim ctx typ cont focante prf =
  gheadm (True, prioProofEqElim, Nothing) (pbc "checkProofEqElim") prf $ \prf -> case prf of
-  UseEq pctr ->
-   unifyToEq pctr focante $ \focante ->
+  UseEq ->
+   unifyToEq focante $ \focante ->
    case focante of
     HNC _ Eq [T typ', F lhs, F rhs] ->
      andp (checkEqType typ typ')
           (cont lhs rhs)
     _ -> err "UseEq : Eq"
-  UseEqSym pctr ->
-   unifyToEq pctr focante $ \focante ->
+  UseEqSym ->
+   unifyToEq focante $ \focante ->
    case focante of
     HNC _ Eq [T typ', F lhs, F rhs] ->
      andp (checkEqType typ typ')
           (cont rhs lhs)
     _ -> err "UseEqSym : Eq"
-  EqElimStep prf pctr ->
-   cheadp (prioDecompFormUnknown, Just BIComputed) (pbc "checkProofEqElim.EqElimStep") (compute focante) $ \(focante, ctr) ->
-   setCompTrace pctr ctr $
+  EqElimStep prf ->
+   cheadp (prioDecompFormUnknown, Just BIComputed) (pbc "checkProofEqElim.EqElimStep") (compute focante) $ \(focante, _) ->
    checkEqElimStep ctx typ cont focante prf
 
 checkEqElimStep :: Context -> MType -> (CFormula -> CFormula -> MetaEnv MPB) -> HNFormula -> MetaEqElimStep -> MetaEnv MPB
@@ -226,19 +225,18 @@ checkEqElimStep ctx typ cont focante prf =
   NTEqElimStep prf ->
    checkNTElimStep ctx focante (checkProofEqElim ctx typ cont) prf
 
-unifyToEq :: MetaCompTrace -> CFormula -> (HNFormula -> MetaEnv MPB) -> MetaEnv MPB
-unifyToEq pctr f cont = g f [] 0
+unifyToEq :: CFormula -> (HNFormula -> MetaEnv MPB) -> MetaEnv MPB
+unifyToEq f cont = g f []
  where
- g f stack count =
-  cheadp (prioUnknownArgs, Nothing) (pbc "unifyToEq.unknownargs") (computei count False f stack) $ \res ->
+ g f stack =
+  cheadp (prioUnknownArgs, Nothing) (pbc "unifyToEq.unknownargs") (computei 0 False f stack) $ \res ->
   case res of
    CFail -> err "computation failed"
-   CDone f ctr ->
-    setCompTrace pctr ctr $
+   CDone f _ ->
     cont f
-   CBlocked f@(Cl env m) stack count ->
+   CBlocked f@(Cl env m) stack ->
     gheadp (False, prioUnifyForm, Just (BIUnifyForm [] (HNC nu Eq [T (error "not used"), F (error "not used"), F (error "not used")]) env)) (pbc "unifyToEq") m $ \_ ->
-    g f stack count
+    g f stack
 
 checkNTElimStep :: Context -> HNFormula -> (CFormula -> a -> MetaEnv MPB) -> NTElimStep a -> MetaEnv MPB
 checkNTElimStep ctx focante cont prf =
@@ -251,7 +249,7 @@ checkNTElimStep ctx focante cont prf =
    HNC _ And [_, F formr] ->
     cont formr prf
    _ -> err "Projr : And"
-  ExistsE _ prf -> case focante of
+  ExistsE prf -> case focante of
    HNC _ Exists [T typ, F cqf@(Cl env qf)] ->
     cont (CApp cqf (Cl env $ NotM $ Choice nu typ qf (NotM ArgNil))) prf
    _ -> err "ProjDep : Exists"
@@ -315,66 +313,60 @@ checkProofEq luids ruids ctx typ lhs rhs prf =
      checkProofEq luids ruids (VarExt it : ctx) ot (CApp (lift 1 lhs) (cl $ NotM $ App nu (Var 0) $ NotM $ ArgNil)) (CApp (lift 1 rhs) (cl $ NotM $ App nu (Var 0) $ NotM $ ArgNil)) prf
     _ -> err "FunExt : Map"
 
-checkProofEqSimp :: [Int] -> [Int] -> Context -> MType -> CFormula -> CFormula -> ProofEqSimp -> MetaEnv MPB
-checkProofEqSimp luids ruids ctx typ lhs' rhs' (Comp prf pctrlhs pctrrhs) = gg lhs' [] rhs' [] 0 0
+checkProofEqSimp :: [Int] -> [Int] -> Context -> MType -> CFormula -> CFormula -> MetaProofEqSimp -> MetaEnv MPB
+checkProofEqSimp luids ruids ctx typ lhs' rhs' prf = gg lhs' [] rhs' []
  where
-  gg lhs lstack rhs rstack lcount rcount =
-   cheadp (prioUnknownArgs, Nothing) (pbc "checkProofEqSimp.unknownargs") (computei lcount False lhs lstack) $ \lres ->
-   cheadp (prioUnknownArgs, Nothing) (pbc "checkProofEqSimp.unknownargs") (computei rcount False rhs rstack) $ \rres ->
+  gg lhs lstack rhs rstack =
+   cheadp (prioUnknownArgs, Nothing) (pbc "checkProofEqSimp.unknownargs") (computei 0 False lhs lstack) $ \lres ->
+   cheadp (prioUnknownArgs, Nothing) (pbc "checkProofEqSimp.unknownargs") (computei 0 False rhs rstack) $ \rres ->
    case (lres, rres) of
     (CFail, _) -> err "computation failed"
     (_, CFail) -> err "computation failed"
-    (CDone lhs ctrlhs, CDone rhs ctrrhs) ->
-     setCompTrace pctrlhs ctrlhs $
-     setCompTrace pctrrhs ctrrhs $
-     checkProofEqSimpB luids ruids ctx typ lhs rhs prf
-    (CDone lhs ctrlhs, CBlocked rhs rstack rcount) ->
+    (CDone lhs _, CDone rhs _) ->
+     checkProofEqSimp2 luids ruids ctx typ lhs rhs prf
+    (CDone lhs _, CBlocked rhs rstack) ->
      let
-      hh rhs@(Cl env m) rstack rcount =
+      hh rhs@(Cl env m) rstack =
        gheadp (False, prioUnifyForm, Just (BIUnifyForm ruids lhs env)) (prCFormula (length ctx) lhs' >>= \plhs -> prCFormula (length ctx) rhs' >>= \prhs -> return ("checkProofEqSimp.rig-flex-unify " ++ show ruids ++ " " ++ plhs ++ " = " ++ prhs)) m $ \_ ->
-       cheadp (prioUnknownArgs, Nothing) (pbc "checkProofEqSimp.unknownargs") (computei rcount False rhs rstack) $ \res ->
+       cheadp (prioUnknownArgs, Nothing) (pbc "checkProofEqSimp.unknownargs") (computei 0 False rhs rstack) $ \res ->
        case res of
         CFail -> err "computation failed"
-        CDone rhs ctrrhs ->
-         setCompTrace pctrrhs ctrrhs $
-         checkProofEqSimpB luids (guid rhs ruids) ctx typ lhs rhs prf
-        CBlocked rhs rstack rcount -> hh rhs rstack rcount
+        CDone rhs _ ->
+         checkProofEqSimp2 luids (guid rhs ruids) ctx typ lhs rhs prf
+        CBlocked rhs rstack -> hh rhs rstack
      in
-      setCompTrace pctrlhs ctrlhs $
-      hh rhs rstack rcount
-    (CBlocked lhs lstack lcount, CDone rhs ctrrhs) ->
+      hh rhs rstack
+    (CBlocked lhs lstack, CDone rhs _) ->
      let
-      hh lhs@(Cl env m) lstack lcount =
+      hh lhs@(Cl env m) lstack =
        gheadp (False, prioUnifyForm, Just (BIUnifyForm luids rhs env)) (prCFormula (length ctx) lhs' >>= \plhs -> prCFormula (length ctx) rhs' >>= \prhs -> return ("checkProofEqSimp.flex-rig-unify " ++ show luids ++ " " ++ plhs ++ " = " ++ prhs)) m $ \_ ->
-       cheadp (prioUnknownArgs, Nothing) (pbc "checkProofEqSimp.unknownargs") (computei lcount False lhs lstack) $ \res ->
+       cheadp (prioUnknownArgs, Nothing) (pbc "checkProofEqSimp.unknownargs") (computei 0 False lhs lstack) $ \res ->
        case res of
         CFail -> err "computation failed"
-        CDone lhs ctrlhs ->
-         setCompTrace pctrlhs ctrlhs $
-         checkProofEqSimpB (guid lhs luids) ruids ctx typ lhs rhs prf
-        CBlocked lhs lstack lcount -> hh lhs lstack lcount
+        CDone lhs _ ->
+         checkProofEqSimp2 (guid lhs luids) ruids ctx typ lhs rhs prf
+        CBlocked lhs lstack -> hh lhs lstack
      in
-      setCompTrace pctrrhs ctrrhs $
-      hh lhs lstack lcount
-    (CBlocked lhs@(Cl _ (Meta m1)) lstack lcount, CBlocked rhs@(Cl _ (Meta m2)) rstack rcount) ->
-     return $ PDoubleBlocked m1 m2 (gg lhs lstack rhs rstack lcount rcount)
+      hh lhs lstack
+    (CBlocked lhs@(Cl _ (Meta m1)) lstack, CBlocked rhs@(Cl _ (Meta m2)) rstack) ->
+     return $ PDoubleBlocked m1 m2 (gg lhs lstack rhs rstack)
   guid (HNC (Just uid) _ _) xs = uid : xs
   guid (HNApp (Just uid) _ _) xs = uid : xs
   guid _ xs = xs
 
-checkProofEqSimpB :: [Int] -> [Int] -> Context -> MType -> HNFormula -> HNFormula -> MetaProofEqSimpB -> MetaEnv MPB
-checkProofEqSimpB luids ruids ctx typ lhs rhs prf =
- gheadm (True, prioProofEqSimpB, Just (BIFormHead (pickhead lhs rhs))) (pbc "checkProofEqSimpB") prf $ \prf ->
+checkProofEqSimp2 :: [Int] -> [Int] -> Context -> MType -> HNFormula -> HNFormula -> MetaProofEqSimp -> MetaEnv MPB
+checkProofEqSimp2 luids ruids ctx typ lhs rhs prf =
+ gheadm (True, prioProofEqSimp, Just (BIFormHead (pickhead lhs rhs))) (pbc "checkProofEqSimp") prf $ \prf ->
   case (lhs, rhs, prf) of
    (HNLam _ typ1 bdy1, HNLam _ typ2 bdy2, SimpLam EMNone prfbdy) ->
-    gheadp (False, prioUnknownType, Nothing) (pbc "checkProofEqSimpB.Lam") typ $ \typ -> case typ of
+    gheadp (False, prioUnknownType, Nothing) (pbc "checkProofEqSimp.Lam") typ $ \typ -> case typ of
      Map ityp otyp ->
       andp (checkEqType ityp typ1) (
       andp (checkEqType ityp typ2)
            (checkProofEq luids ruids (VarExt ityp : ctx) otyp bdy1 bdy2 prfbdy))
      _ -> err "eq lam type mismatch"
    (HNLam _ typ1 bdy1, HNApp muid elr2 args2, SimpLam EMRight prfbdy) ->
-    gheadp (False, prioUnknownType, Nothing) (pbc "checkProofEqSimpB.Lam") typ $ \typ -> case typ of
+    gheadp (False, prioUnknownType, Nothing) (pbc "checkProofEqSimp.Lam") typ $ \typ -> case typ of
      Map ityp otyp ->
       andp (checkEqType ityp typ1)
            (checkProofEq luids ruids (VarExt ityp : ctx) otyp bdy1 bdy2 prfbdy)
@@ -385,7 +377,7 @@ checkProofEqSimpB luids ruids ctx typ lhs rhs prf =
               Glob g -> Glob g
      bdy2 = CHN (HNApp muid lelr2 (map (\(ClA env x) -> ClA (Lift 1 : env) x) args2 ++ [ClA [] $ NotM $ ArgCons (NotM $ App nu (Var 0) $ NotM ArgNil) (NotM ArgNil)]))
    (HNLam _ typ1 bdy1, HNChoice muid typ2 qf2 args2, SimpLam EMRight prfbdy) ->
-    gheadp (False, prioUnknownType, Nothing) (pbc "checkProofEqSimpB.Lam") typ $ \typ -> case typ of
+    gheadp (False, prioUnknownType, Nothing) (pbc "checkProofEqSimp.Lam") typ $ \typ -> case typ of
      Map ityp otyp ->
       andp (checkEqType ityp typ1)
            (checkProofEq luids ruids (VarExt ityp : ctx) otyp bdy1 bdy2 prfbdy)
@@ -393,7 +385,7 @@ checkProofEqSimpB luids ruids ctx typ lhs rhs prf =
     where
      bdy2 = CHN (HNChoice muid typ2 (lift 1 qf2) (map (\(ClA env x) -> ClA (Lift 1 : env) x) args2 ++ [ClA [] $ NotM $ ArgCons (NotM $ App nu (Var 0) $ NotM ArgNil) (NotM ArgNil)]))
    (HNApp muid elr1 args1, HNLam _ typ2 bdy2, SimpLam EMLeft prfbdy) ->
-    gheadp (False, prioUnknownType, Nothing) (pbc "checkProofEqSimpB.Lam") typ $ \typ -> case typ of
+    gheadp (False, prioUnknownType, Nothing) (pbc "checkProofEqSimp.Lam") typ $ \typ -> case typ of
      Map ityp otyp ->
       andp (checkEqType ityp typ2)
            (checkProofEq luids ruids (VarExt ityp : ctx) otyp bdy1 bdy2 prfbdy)
@@ -404,7 +396,7 @@ checkProofEqSimpB luids ruids ctx typ lhs rhs prf =
               Glob g -> Glob g
      bdy1 = CHN (HNApp muid lelr1 (map (\(ClA env x) -> ClA (Lift 1 : env) x) args1 ++ [ClA [] $ NotM $ ArgCons (NotM $ App nu (Var 0) $ NotM ArgNil) (NotM ArgNil)]))
    (HNChoice muid typ1 qf1 args1, HNLam _ typ2 bdy2, SimpLam EMLeft prfbdy) ->
-    gheadp (False, prioUnknownType, Nothing) (pbc "checkProofEqSimpB.Lam") typ $ \typ -> case typ of
+    gheadp (False, prioUnknownType, Nothing) (pbc "checkProofEqSimp.Lam") typ $ \typ -> case typ of
      Map ityp otyp ->
       andp (checkEqType ityp typ2)
            (checkProofEq luids ruids (VarExt ityp : ctx) otyp bdy1 bdy2 prfbdy)
@@ -436,25 +428,25 @@ checkProofEqSimpB luids ruids ctx typ lhs rhs prf =
  where
   chargs :: MType -> [CArgs] -> [CArgs] -> MetaProofEqs -> MetaEnv MPB
   chargs typ stack1 stack2 prfs =
-   cheadp (prioUnknownArgs, Nothing) (pbc "checkProofEqSimpB.app/choice-arg") (getStackHead stack1) $ \stack1 ->
-   cheadp (prioUnknownArgs, Nothing) (pbc "checkProofEqSimpB.app/choice-arg") (getStackHead stack2) $ \stack2 ->
+   cheadp (prioUnknownArgs, Nothing) (pbc "checkProofEqSimp.app/choice-arg") (getStackHead stack1) $ \stack1 ->
+   cheadp (prioUnknownArgs, Nothing) (pbc "checkProofEqSimp.app/choice-arg") (getStackHead stack2) $ \stack2 ->
    case (stack1, stack2) of
     (HNNil, HNNil) ->
-     gheadm (True, prioProofEqSimpB, Just (BISimpArgs False)) (pbc "checkProofEqSimpB.app/choice-nil") prfs $ \prfs ->
+     gheadm (True, prioProofEqSimp, Just (BISimpArgs False)) (pbc "checkProofEqSimp.app/choice-nil") prfs $ \prfs ->
      case prfs of
       PrEqNil -> ok
       PrEqCons{} -> error "PrEqCons"
     (HNCons a1 stack1, HNCons a2 stack2) ->
-     gheadm (True, prioProofEqSimpB, Just (BISimpArgs True)) (pbc "checkProofEqSimpB.app/choice-cons") prfs $ \prfs ->
+     gheadm (True, prioProofEqSimp, Just (BISimpArgs True)) (pbc "checkProofEqSimp.app/choice-cons") prfs $ \prfs ->
      case prfs of
       PrEqNil -> error "PrEqNil"
       PrEqCons prf prfs ->
-       gheadp (False, prioUnknownType, Nothing) (pbc "checkProofEqSimpB.chargs") typ $ \typ -> case typ of
+       gheadp (False, prioUnknownType, Nothing) (pbc "checkProofEqSimp.chargs") typ $ \typ -> case typ of
         Map ityp otyp ->
          andp (checkProofEq luids ruids ctx ityp a1 a2 prf)
               (chargs otyp stack1 stack2 prfs)
         _ -> err "eq app/choice type mismatch"
-    _ -> err "checkProofEqSimpB: arg list length mismatch"
+    _ -> err "checkProofEqSimp: arg list length mismatch"
   pickhead (HNLam{}) (HNLam{}) = FHLamLam
   pickhead (HNLam{}) _ = FHLamApp
   pickhead _ (HNLam{}) = FHAppLam

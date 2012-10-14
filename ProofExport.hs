@@ -44,11 +44,10 @@ agdaProof prob proof = do
      return subproofname
     else
      prMeta p $ \p -> case p of
-      Intro p ctr ->
-       prMeta ctr $ \(CompTrace ctr) ->
-       condWrap (ctr > 0) ("(hn-succ " ++ show ctr ++ " _ ") ")" $ do
-       etyp <- headnormalize etyp
-       eIntro ctx etyp p
+      Intro p -> do
+       (etyp, ctr) <- headnormalize etyp
+       condWrap (ctr > 0) ("(hn-succ " ++ show ctr ++ " _ ") ")" $
+        eIntro ctx etyp p
       Elim hyp p -> do
        (hyp1, hyp2, ityp) <- eHyp ctx hyp False
        p <- eProofElim ctx etyp ityp p
@@ -95,10 +94,9 @@ agdaProof prob proof = do
       Use p -> do
        p <- eProofEqSimp ctx typeBool etyp ityp p
        return $ "(use " ++ p ++ ")"
-      ElimStep p ctr -> do
-       ityp <- headnormalize ityp
-       prMeta ctr $ \(CompTrace ctr) ->
-        condWrap (ctr > 0) ("(hn-ante " ++ show ctr ++ " _ _ ") ")" $
+      ElimStep p -> do
+       (ityp, ctr) <- headnormalize ityp
+       condWrap (ctr > 0) ("(hn-ante " ++ show ctr ++ " _ _ ") ")" $
         eElimStep ctx etyp ityp p
 
   eProofEqElim :: IORef (CFormula, CFormula) -> ECtx -> MType -> CFormula -> CFormula -> CFormula -> MetaProofEqElim -> IO String
@@ -120,22 +118,19 @@ agdaProof prob proof = do
      return subproofname
     else
      prMeta p $ \p -> case p of
-      UseEq ctr -> do
-       HNC _ Eq [_, F lhs', F rhs'] <- headnormalize ityp
+      UseEq -> do
+       (HNC _ Eq [_, F lhs', F rhs'], ctr) <- headnormalize ityp
        writeIORef xx (lhs', rhs')
-       prMeta ctr $ \(CompTrace ctr) ->
-        condWrap (ctr > 0) ("(hn-ante-eq " ++ show ctr ++ " _ _ _ ") ")" $
+       condWrap (ctr > 0) ("(hn-ante-eq " ++ show ctr ++ " _ _ _ ") ")" $
         return "use"
-      UseEqSym ctr -> do
-       HNC _ Eq [_, F lhs', F rhs'] <- headnormalize ityp
+      UseEqSym -> do
+       (HNC _ Eq [_, F lhs', F rhs'], ctr) <- headnormalize ityp
        writeIORef xx (rhs', lhs')
-       prMeta ctr $ \(CompTrace ctr) ->
-        condWrap (ctr > 0) ("(hn-ante-eq " ++ show ctr ++ " _ _ _ ") ")" $
+       condWrap (ctr > 0) ("(hn-ante-eq " ++ show ctr ++ " _ _ _ ") ")" $
         return "use-sym"
-      EqElimStep p ctr -> do
-       ityp <- headnormalize ityp
-       prMeta ctr $ \(CompTrace ctr) ->
-        condWrap (ctr > 0) ("(hn-ante-eq " ++ show ctr ++ " _ _ _ ") ")" $
+      EqElimStep p -> do
+       (ityp, ctr) <- headnormalize ityp
+       condWrap (ctr > 0) ("(hn-ante-eq " ++ show ctr ++ " _ _ _ ") ")" $
         eEqElimStep xx ctx typ lhs rhs ityp p
 
   eEqElimStep :: IORef (CFormula, CFormula) -> ECtx -> MType -> CFormula -> CFormula -> HNFormula -> MetaEqElimStep -> IO String
@@ -169,7 +164,7 @@ agdaProof prob proof = do
      let HNC _ And [_, F typ] = ityp
      p <- pr typ p
      return $ "(&-E-r " ++ p ++ ")"
-    ExistsE _ p -> do
+    ExistsE p -> do
      _ <- ticksize 2
      let HNC _ Exists [T typ, F cf@(Cl env mf)] = ityp
          ityp' = CApp cf (Cl env $ NotM $ Choice nu typ mf (NotM ArgNil))
@@ -220,7 +215,7 @@ agdaProof prob proof = do
      p1 <- eProof ctx typ1 p1
      p2 <- eProof ctx typ2 p2
      return $ "(&-I " ++ p1 ++ " " ++ p2 ++ ")"
-    ExistsI _ f p -> do
+    ExistsI f p -> do
      _ <- ticksize 2
      let HNC _ Exists [T typ, F cf] = etyp
          etyp' = CApp cf (cl (Meta f))
@@ -289,13 +284,11 @@ agdaProof prob proof = do
        p <- eProofEq (Vr it : ctx) ot lhs' rhs' p
        return $ "(fun-ext " ++ p ++ ")"
 
-  eProofEqSimp :: ECtx -> MType -> CFormula -> CFormula -> ProofEqSimp -> IO String
-  eProofEqSimp ctx typ lhs rhs (Comp p ctr1 ctr2) = do
-   lhs <- headnormalize lhs
-   rhs <- headnormalize rhs
-   prMeta ctr1 $ \(CompTrace ctr1) ->
-    condWrap (ctr1 > 0) ("(hn-left " ++ show ctr1 ++ " _ _ ") ")" $
-    prMeta ctr2 $ \(CompTrace ctr2) ->
+  eProofEqSimp :: ECtx -> MType -> CFormula -> CFormula -> MetaProofEqSimp -> IO String
+  eProofEqSimp ctx typ lhs rhs p = do
+   (lhs, ctr1) <- headnormalize lhs
+   (rhs, ctr2) <- headnormalize rhs
+   condWrap (ctr1 > 0) ("(hn-left " ++ show ctr1 ++ " _ _ ") ")" $
     condWrap (ctr2 > 0) ("(hn-right " ++ show ctr2 ++ " _ _ ") ")" $
     prMeta p $ \p -> case p of
      SimpLam em p -> do
@@ -701,9 +694,9 @@ condWrap False _ _ c = c
 
 -- ----------------------------
 
-headnormalize :: CFormula -> IO HNFormula
+headnormalize :: CFormula -> IO (HNFormula, CompTrace)
 headnormalize f =
- compute f >>= \(NotB (f, _)) -> return f
+ compute f >>= \(NotB x) -> return x
 
 headnormalizeargs :: [CArgs] -> IO HNArgs
 headnormalizeargs xs =

@@ -10,7 +10,7 @@ import Syntax
 
 instance Refinable Proof Blk where
  refinements _ _ _ = return $
-   [(0, newPlaceholder >>= \m1 -> newPlaceholder >>= \m2 -> return (Intro m1 m2), "Intro"),
+   [(0, newPlaceholder >>= \m -> return (Intro m), "Intro"),
     (0, newPlaceholder >>= \m1 -> newPlaceholder >>= \m2 -> return (Elim m1 m2), "Elim"),
     (costRAA, newPlaceholder >>= \m -> return (RAA m), "RAA")
    ]
@@ -34,8 +34,8 @@ instance Refinable Intro Blk where
      (0, newPlaceholder >>= \m -> return (OrIr m), "OrIr")]
    HNC _ And _ ->
     [(0, newPlaceholder >>= \m1 -> newPlaceholder >>= \m2 -> return (AndI m1 m2), "AndI")]
-   HNC _ Exists [_, F cf] ->
-    [(0, newPlaceholder >>= \m1 -> newPlaceholder >>= \m2 -> return (ExistsI cf m1 m2), "ExistsI")]
+   HNC _ Exists _ ->
+    [(0, newPlaceholder >>= \m1 -> newPlaceholder >>= \m2 -> return (ExistsI m1 m2), "ExistsI")]
    HNC _ Implies _ ->
     [(0, newPlaceholder >>= \m -> return (ImpliesI m), "ImpliesI")]
    HNC _ Not _ ->
@@ -50,8 +50,8 @@ instance Refinable Intro Blk where
 
 instance Refinable ProofElim Blk where
  refinements _ _ _ = return $
-  [(0, newPlaceholder >>= \m1 -> newPlaceholder >>= \m2 -> newPlaceholder >>= \m3 -> return (Use (Comp m1 m2 m3)), "Use"),
-   (0, newPlaceholder >>= \m1 -> newPlaceholder >>= \m2 -> return (ElimStep m1 m2), "ElimStep")
+  [(0, newPlaceholder >>= \m -> return (Use m), "Use"),
+   (0, newPlaceholder >>= \m -> return (ElimStep m), "ElimStep")
   ]
 
 instance Refinable ElimStep Blk where
@@ -67,9 +67,9 @@ instance Refinable ElimStep Blk where
 
 instance Refinable ProofEqElim Blk where
  refinements _ _ _ = return $
-  [(0, newPlaceholder >>= \m -> return (UseEq m), "UseEq"),
-   (0, newPlaceholder >>= \m -> return (UseEqSym m), "UseEqSym"),
-   (0, newPlaceholder >>= \m1 -> newPlaceholder >>= \m2 -> return (EqElimStep m1 m2), "EqElimStep")]
+  [(0, return UseEq, "UseEq"),
+   (0, return UseEqSym, "UseEqSym"),
+   (0, newPlaceholder >>= \m -> return (EqElimStep m), "EqElimStep")]
 
 instance Refinable EqElimStep Blk where
  refinements _ [BIForm f] _ = return $
@@ -80,8 +80,8 @@ refNTElimStep c f cep =
   HNC _ And _ ->
    [(0, cep >>= \m -> return (c $ AndEl m), "AndEl"),
     (0, cep >>= \m -> return (c $ AndEr m), "AndEr")]
-  HNC _ Exists [_, F cf] ->
-   [(0, cep >>= \m -> return (c $ ExistsE cf m), "ExistsE")]
+  HNC _ Exists _ ->
+   [(0, cep >>= \m -> return (c $ ExistsE m), "ExistsE")]
   HNC _ Implies _ ->
    [(0, newPlaceholder >>= \m1 -> cep >>= \m2 -> return (c $ ImpliesE m1 m2), "ImpliesE")]
   HNC _ Forall _ ->
@@ -94,13 +94,12 @@ refNTElimStep c f cep =
 
 instance Refinable ProofEq Blk where
  refinements _ [] _ = return $
-  [(0, newPlaceholder >>= \m1 -> newPlaceholder >>= \m2 -> newPlaceholder >>= \m3 -> return (Simp (Comp m1 m2 m3)), "Simp"),
+  [(0, newPlaceholder >>= \m -> return (Simp m), "Simp"),
    (0{-1000-}, newPlaceholder >>= \m1 -> newPlaceholder >>= \m2 -> newPlaceholder >>= \m3 -> newPlaceholder >>= \m4 ->
-       newPlaceholder >>= \m5 -> newPlaceholder >>= \m6 ->
-       return (Step m1 m2 (Comp m3 m4 m5) m6), "Step") , (costBoolExt, newPlaceholder >>= \m1 -> newPlaceholder >>= \m2 -> return (BoolExt m1 m2), "BoolExt"),
+       return (Step m1 m2 m3 m4), "Step") , (costBoolExt, newPlaceholder >>= \m1 -> newPlaceholder >>= \m2 -> return (BoolExt m1 m2), "BoolExt"),
    (costFunExt, newPlaceholder >>= \m -> return (FunExt m), "FunExt")]
 
-instance Refinable ProofEqSimpB Blk where
+instance Refinable ProofEqSimp Blk where
  refinements _ [BIFormHead fh] _ = return $
   case fh of
    FHLamLam -> [(0, newPlaceholder >>= \m -> return (SimpLam EMNone m), "SimpLam EMNone")]
@@ -210,12 +209,9 @@ instance Refinable Args Blk where
   [(0, return ArgNil, "ArgNil"),
    (0, newPlaceholder >>= \m1 -> newPlaceholder >>= \m2 -> return (ArgCons (Meta m1) (Meta m2)), "ArgCons")]
 
-instance Refinable CompTrace Blk where
- refinements _ [BICompTraceValue ctr] _ = return $ [(0, return ctr, "comptrace")]
-
 -- --------------------------------------------------
 
-prioProof, prioIntro, prioHyp, prioProofElim, prioProofEqSimpB, prioElimStep, prioEqElimStep, prioProofEqElim, prioProofEq, prioUnifyForm, prioUnifyType, prioDecompFormUnknown, prioUnknownType, prioCheckFormUnknownType, prioCheckForm, prioUnknownArgs, prioUnknownInferredType, prioCheckFormArgs, prioCheckType, prioUnknownGoal :: Int
+prioProof, prioIntro, prioHyp, prioProofElim, prioProofEqSimp, prioElimStep, prioEqElimStep, prioProofEqElim, prioProofEq, prioUnifyForm, prioUnifyType, prioDecompFormUnknown, prioUnknownType, prioCheckFormUnknownType, prioCheckForm, prioUnknownArgs, prioUnknownInferredType, prioCheckFormArgs, prioCheckType, prioUnknownGoal :: Int
 prioProof = 5
 prioIntro = 6
 prioHyp = 6
@@ -224,7 +220,7 @@ prioElimStep = 6
 prioEqElimStep = 6
 prioProofEqElim = 6
 prioProofEq = 7
-prioProofEqSimpB = 8
+prioProofEqSimp = 8
 
 prioDecompFormUnknown = 6
 prioUnknownType = 1
@@ -239,8 +235,6 @@ prioCheckType = 1
 prioUnknownGoal = 1
 
 prioUnknownArgs = 8
-
-prioSetCompTrace = 11
 
 prioNo = 0
 
@@ -270,10 +264,6 @@ pbc :: String -> IO String
 pbc = return
 
 
-setCompTrace :: MetaCompTrace -> CompTrace -> MetaEnv MPB -> MetaEnv MPB
-setCompTrace pctr ctr cont =
- gheadm (True, prioSetCompTrace, Just (BICompTraceValue ctr)) (return "setCompTrace") pctr $ \_ -> cont
-
 -- -------------------------------
 
 data NewHypState = NewGlobHyps | NewHyp Int (Maybe (MetaHyp, MetaProofElim)) | NoNewHyp
@@ -288,7 +278,7 @@ sidecontrol prf st = scprf prf st
  where
   scprf prf st =
    gheadm (False, prioNo, Nothing) (pbc "sidecontrol") prf $ \prf -> case prf of
-    Intro prf _ -> scintro prf st
+    Intro prf -> scintro prf st
     Elim hyp prf ->
      gheadm (False, prioNo, Nothing) (pbc "sidecontrol") hyp $ \(Hyp elr _) ->
      travHyp elr st $ scelim prf
@@ -296,7 +286,7 @@ sidecontrol prf st = scprf prf st
       scelim prf gc st =
        gheadm (False, prioNo, Nothing) (pbc "sidecontrol") prf $ \prf -> case prf of
         Use prf -> sceqsimp prf (noNewHyp st)
-        ElimStep prf _ -> scestep prf gc st
+        ElimStep prf -> scestep prf gc st
 
       scestep prf gc st =
        gheadm (False, prioNo, Nothing) (pbc "sidecontrol") prf $ \prf -> case prf of
@@ -354,7 +344,7 @@ sidecontrol prf st = scprf prf st
     AndI prf1 prf2 ->
      andp (scprf prf1 (noNewHyp st))
           (scprf prf2 (noNewHyp st))
-    ExistsI _ _ prf -> scprf prf (noNewHyp st)
+    ExistsI _ prf -> scprf prf (noNewHyp st)
     ImpliesI prf -> extCtx (newHyp st) $ scprf prf
     NotI prf -> extCtx (newHyp st) $ scprf prf
     ForallI prf -> extCtx (noNewHyp st) $ scprf prf
@@ -363,9 +353,9 @@ sidecontrol prf st = scprf prf st
 
   sceqelim prf gc st =
    gheadm (False, prioNo, Nothing) (pbc "sidecontrol") prf $ \prf -> case prf of
-    UseEq _ -> ok
-    UseEqSym _ -> ok
-    EqElimStep prf _ -> sceqestep prf gc st
+    UseEq -> ok
+    UseEqSym -> ok
+    EqElimStep prf -> sceqestep prf gc st
 
   sceqestep prf gc st =
    gheadm (False, prioNo, Nothing) (pbc "sidecontrol") prf $ \prf -> case prf of
@@ -382,7 +372,7 @@ sidecontrol prf st = scprf prf st
      where gc' = case gc of
                   GCFork _ x -> x
                   GCLocalHyp -> gc
-    ExistsE _ prf -> c prf gc st
+    ExistsE prf -> c prf gc st
     ImpliesE prf1 prf2 ->
      mpret $ Cost gccost $
      andp (scprf prf1 (noNewHyp st))
@@ -440,7 +430,7 @@ sidecontrol prf st = scprf prf st
      else
       extCtx st $ sceq prf False True
 
-  sceqsimp (Comp prf _ _) st =
+  sceqsimp prf st =
    gheadm (False, prioNo, Nothing) (pbc "sidecontrol") prf $ \prf -> case prf of
     SimpLam _ prf -> extCtx st $ sceq prf False True
     SimpCons _ prfs -> andps (\prf -> sceq prf False True st) prfs
@@ -496,7 +486,7 @@ mostLocalHyp :: MetaHyp -> MetaProofElim -> MetaEnv (MMB Int)
 mostLocalHyp hyp prf = cmin (fhyp 0 hyp) (felim True 0 prf)
  where
   fprf n prf = gheadc (Meta prf) $ \prf -> case prf of
-   Intro prf _ -> fintro n prf
+   Intro prf -> fintro n prf
    Elim hyp prf ->
     cmin (fhyp n hyp) (felim False n prf)
    RAA prf -> fprf (n + 1) prf
@@ -510,7 +500,7 @@ mostLocalHyp hyp prf = cmin (fhyp 0 hyp) (felim True 0 prf)
    OrIl prf -> fprf n prf
    OrIr prf -> fprf n prf
    AndI prf1 prf2 -> cmin (fprf n prf1) (fprf n prf2)
-   ExistsI _ _ prf -> fprf n prf
+   ExistsI _ prf -> fprf n prf
    ImpliesI prf -> fprf (n + 1) prf
    NotI prf -> fprf (n + 1) prf
    ForallI prf -> fprf (n + 1) prf
@@ -520,7 +510,7 @@ mostLocalHyp hyp prf = cmin (fhyp 0 hyp) (felim True 0 prf)
   felim istopelim n prf =
    gheadc (Meta prf) $ \prf -> case prf of
     Use prf -> feqsimp n prf
-    ElimStep prf _ -> festep istopelim n prf
+    ElimStep prf -> festep istopelim n prf
 
   festep istopelim n prf =
    gheadc (Meta prf) $ \prf -> case prf of
@@ -534,9 +524,9 @@ mostLocalHyp hyp prf = cmin (fhyp 0 hyp) (felim True 0 prf)
     NTElimStep prf -> fntestep (felim istopelim) n prf
 
   feqelim n prf = gheadc (Meta prf) $ \prf -> case prf of
-    UseEq _ -> mbret noLocal
-    UseEqSym _ -> mbret noLocal
-    EqElimStep prf _ -> feqestep n prf
+    UseEq -> mbret noLocal
+    UseEqSym -> mbret noLocal
+    EqElimStep prf -> feqestep n prf
 
   feqestep n prf =
    gheadc (Meta prf) $ \prf -> case prf of
@@ -547,7 +537,7 @@ mostLocalHyp hyp prf = cmin (fhyp 0 hyp) (felim True 0 prf)
    case prf of
     AndEl prf -> c n prf
     AndEr prf -> c n prf
-    ExistsE _ prf -> c n prf
+    ExistsE prf -> c n prf
     ImpliesE prf1 prf2 ->
      cmin (fprf n prf1) (c n prf2)
     ForallE _ prf -> c n prf
@@ -568,7 +558,7 @@ mostLocalHyp hyp prf = cmin (fhyp 0 hyp) (felim True 0 prf)
     FunExt prf ->
      feq (n + 1) prf
 
-  feqsimp n (Comp prf _ _) =
+  feqsimp n prf =
    gheadc (Meta prf) $ \prf -> case prf of
     SimpLam _ prf -> feq (n + 1) prf
     SimpCons _ prfs -> ff prfs
@@ -597,7 +587,7 @@ compareElim scopediff hyp1 prf1 hyp2 prf2 = ccomp (fhyp hyp1 hyp2) (felim True p
  where
   fprf prf1 prf2 =
    gheadc (Meta prf1) $ \prf1 -> gheadc (Meta prf2) $ \prf2 -> case (prf1, prf2) of
-    (Intro prf1 _, Intro prf2 _) -> fintro prf1 prf2
+    (Intro prf1, Intro prf2) -> fintro prf1 prf2
     (Elim hyp1 prf1, Elim hyp2 prf2) ->
      ccomp (fhyp hyp1 hyp2) (felim False prf1 prf2)
     (RAA prf1, RAA prf2) -> fprf prf1 prf2
@@ -621,7 +611,7 @@ compareElim scopediff hyp1 prf1 hyp2 prf2 = ccomp (fhyp hyp1 hyp2) (felim True p
    (OrIl prf1, OrIl prf2) -> fprf prf1 prf2
    (OrIr prf1, OrIr prf2) -> fprf prf1 prf2
    (AndI prfl1 prfr1, AndI prfl2 prfr2) -> ccomp (fprf prfl1 prfl2) (fprf prfr1 prfr2)
-   (ExistsI _ form1 prf1, ExistsI _ form2 prf2) -> ccomp (fform (Meta form1) (Meta form2)) (fprf prf1 prf2)
+   (ExistsI form1 prf1, ExistsI form2 prf2) -> ccomp (fform (Meta form1) (Meta form2)) (fprf prf1 prf2)
    (ImpliesI prf1, ImpliesI prf2) -> fprf prf1 prf2
    (NotI prf1, NotI prf2) -> fprf prf1 prf2
    (ForallI prf1, ForallI prf2) -> fprf prf1 prf2
@@ -642,7 +632,7 @@ compareElim scopediff hyp1 prf1 hyp2 prf2 = ccomp (fhyp hyp1 hyp2) (felim True p
   felim istopelim prf1 prf2 =
    gheadc (Meta prf1) $ \prf1 -> gheadc (Meta prf2) $ \prf2 -> case (prf1, prf2) of
     (Use prf1, Use prf2) -> feqsimp prf1 prf2
-    (ElimStep prf1 _, ElimStep prf2 _) -> festep istopelim prf1 prf2
+    (ElimStep prf1, ElimStep prf2) -> festep istopelim prf1 prf2
     _ -> mbret $ compare (ielim prf1) (ielim prf2)
 
   ielim (Use{}) = 0
@@ -666,9 +656,9 @@ compareElim scopediff hyp1 prf1 hyp2 prf2 = ccomp (fhyp hyp1 hyp2) (felim True p
   iestep (NTElimStep{}) = 3
 
   feqelim prf1 prf2 = gheadc (Meta prf1) $ \prf1 -> gheadc (Meta prf2) $ \prf2 -> case (prf1, prf2) of
-    (UseEq _, UseEq _) -> mbret EQ
-    (UseEqSym _, UseEqSym _) -> mbret EQ
-    (EqElimStep prf1 _, EqElimStep prf2 _) -> feqestep prf1 prf2
+    (UseEq, UseEq) -> mbret EQ
+    (UseEqSym, UseEqSym) -> mbret EQ
+    (EqElimStep prf1, EqElimStep prf2) -> feqestep prf1 prf2
     _ -> mbret $ compare (ieqelim prf1) (ieqelim prf2)
 
   ieqelim (UseEq{}) = 0
@@ -684,7 +674,7 @@ compareElim scopediff hyp1 prf1 hyp2 prf2 = ccomp (fhyp hyp1 hyp2) (felim True p
    case (prf1, prf2) of
     (AndEl prf1, AndEl prf2) -> c prf1 prf2
     (AndEr prf1, AndEr prf2) -> c prf1 prf2
-    (ExistsE _ prf1, ExistsE _ prf2) -> c prf1 prf2
+    (ExistsE prf1, ExistsE prf2) -> c prf1 prf2
     (ImpliesE prfl1 prfr1, ImpliesE prfl2 prfr2) ->
      ccomp (fprf prfl1 prfl2) (c prfr1 prfr2)
     (ForallE form1 prf1, ForallE form2 prf2) -> ccomp (fform (Meta form1) (Meta form2)) (c prf1 prf2)
@@ -721,7 +711,7 @@ compareElim scopediff hyp1 prf1 hyp2 prf2 = ccomp (fhyp hyp1 hyp2) (felim True p
   ieq (BoolExt{}) = 2
   ieq (FunExt{}) = 3
 
-  feqsimp (Comp prf1 _ _) (Comp prf2 _ _) =
+  feqsimp prf1 prf2 =
    gheadc (Meta prf1) $ \prf1 -> gheadc (Meta prf2) $ \prf2 -> case (prf1, prf2) of
     (SimpLam _ prf1, SimpLam _ prf2) -> feq prf1 prf2
     (SimpCons c1 prfs1, SimpCons c2 prfs2) ->

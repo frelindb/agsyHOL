@@ -13,7 +13,6 @@ data Blk = BIEnv [GlobHyp]
          | BICheckForm Type
          | BIComputed
          | BISimpArgs Bool  -- shoud be cons (otherwise nil)
-         | BICompTraceValue CompTrace
          | BIFormHead FormHead
 
 data FormHead = FHLamLam | FHLamApp | FHAppLam | FHC Cons | FHApp | FHChoice
@@ -89,7 +88,7 @@ data GlobVar = GlobVar {gvName :: String, gvType :: MType, gvId :: Int}
 
 -- -----------------------
 
-data Proof = Intro MetaIntro MetaCompTrace
+data Proof = Intro MetaIntro
            | Elim MetaHyp MetaProofElim
            | RAA MetaProof
 type MetaProof = MMetavar Proof
@@ -97,7 +96,7 @@ type MetaProof = MMetavar Proof
 data Intro = OrIl MetaProof
            | OrIr MetaProof
            | AndI MetaProof MetaProof
-           | ExistsI CFormula MetaFormula MetaProof  -- the CFormula is the contents of the exist, used to produce agda proofs with enough information
+           | ExistsI MetaFormula MetaProof
            | ImpliesI MetaProof
            | NotI MetaProof
            | ForallI MetaProof
@@ -105,8 +104,8 @@ data Intro = OrIl MetaProof
            | EqI MetaProofEq
 type MetaIntro = MMetavar Intro
 
-data ProofElim = Use ProofEqSimp
-               | ElimStep MetaElimStep MetaCompTrace
+data ProofElim = Use MetaProofEqSimp
+               | ElimStep MetaElimStep
 type MetaProofElim = MMetavar ProofElim
 
 data ElimStep = BotE
@@ -115,9 +114,9 @@ data ElimStep = BotE
               | NTElimStep (NTElimStep MetaProofElim)
 type MetaElimStep = MMetavar ElimStep
 
-data ProofEqElim = UseEq MetaCompTrace
-                 | UseEqSym MetaCompTrace
-                 | EqElimStep MetaEqElimStep MetaCompTrace
+data ProofEqElim = UseEq
+                 | UseEqSym
+                 | EqElimStep MetaEqElimStep
 type MetaProofEqElim = MMetavar ProofEqElim
 
 data EqElimStep = NTEqElimStep (NTElimStep MetaProofEqElim)
@@ -125,15 +124,15 @@ type MetaEqElimStep = MMetavar EqElimStep
 
 data NTElimStep a = AndEl a
                   | AndEr a
-                  | ExistsE CFormula a  -- the CFormula is the contents of the exist, used to produce agda proofs with enough information
+                  | ExistsE a
                   | ImpliesE MetaProof a
                   | ForallE MetaFormula a
                   | InvBoolExtl MetaProof a
                   | InvBoolExtr MetaProof a
                   | InvFunExt MetaFormula a
 
-data ProofEq = Simp ProofEqSimp
-             | Step MetaHyp MetaProofEqElim ProofEqSimp MetaProofEq
+data ProofEq = Simp MetaProofEqSimp
+             | Step MetaHyp MetaProofEqElim MetaProofEqSimp MetaProofEq
              | BoolExt MetaProof MetaProof
              | FunExt MetaProofEq
 type MetaProofEq = MMetavar ProofEq
@@ -142,13 +141,11 @@ data ProofEqs = PrEqNil
               | PrEqCons MetaProofEq MetaProofEqs
 type MetaProofEqs = MMetavar ProofEqs
 
-data ProofEqSimp = Comp MetaProofEqSimpB MetaCompTrace MetaCompTrace
-
-data ProofEqSimpB = SimpCons Cons [MetaProofEq]
-                  | SimpApp MetaProofEqs
-                  | SimpChoice MetaProofEq MetaProofEqs
-                  | SimpLam EtaMode MetaProofEq
-type MetaProofEqSimpB = MMetavar ProofEqSimpB
+data ProofEqSimp = SimpCons Cons [MetaProofEq]
+                 | SimpApp MetaProofEqs
+                 | SimpChoice MetaProofEq MetaProofEqs
+                 | SimpLam EtaMode MetaProofEq
+type MetaProofEqSimp = MMetavar ProofEqSimp
 
 data EtaMode = EMNone | EMLeft | EMRight
 
@@ -158,9 +155,6 @@ data HElr = HVar Int
 
 data Hyp = Hyp HElr CFormula
 type MetaHyp = MMetavar Hyp
-
-data CompTrace = CompTrace Int  -- number of reductions
-type MetaCompTrace = MMetavar CompTrace
 
 data GlobHyp = GlobHyp {ghName :: String, ghForm :: MFormula, ghId :: Int, ghGenCost :: GenCost}
 

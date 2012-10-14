@@ -17,7 +17,7 @@ prMeta m prv = do
 prProof :: Int -> MetaProof -> IO String
 prProof ctx p =
  prMeta p $ \p -> case p of
-  Intro p _ -> prIntro ctx p
+  Intro p -> prIntro ctx p
   Elim hyp p -> do
    hyp <- prHyp ctx hyp
    p <- prProofElim ctx p
@@ -39,7 +39,7 @@ prIntro ctx p =
    p1 <- prProof ctx p1
    p2 <- prProof ctx p2
    return $ "(And-I " ++ p1 ++ " " ++ p2 ++ ")"
-  ExistsI _ f p -> do
+  ExistsI f p -> do
    f <- prForm ctx $ Meta f
    p <- prProof ctx p
    return $ "(Exists-I " ++ f ++ " " ++ p ++ ")"
@@ -76,14 +76,14 @@ prProofElim ctx p =
   Use p -> do
    p <- prProofEqSimp ctx p
    return $ "(use " ++ p ++ ")"
-  ElimStep p _ -> prElimStep ctx p
+  ElimStep p -> prElimStep ctx p
 
 prProofEqElim :: Int -> MetaProofEqElim -> IO String
 prProofEqElim ctx p =
  prMeta p $ \p -> case p of
-  UseEq _ -> return "use-eq"
-  UseEqSym _ -> return "use-eq-sym"
-  EqElimStep p _ -> prEqElimStep ctx p
+  UseEq -> return "use-eq"
+  UseEqSym -> return "use-eq-sym"
+  EqElimStep p -> prEqElimStep ctx p
 
 prEqElimStep :: Int -> MetaEqElimStep -> IO String
 prEqElimStep ctx p =
@@ -112,7 +112,7 @@ prNTElimStep pr ctx p =
   AndEr p -> do
    p <- pr p
    return $ "(And-Er " ++ p ++ ")"
-  ExistsE _ p -> do
+  ExistsE p -> do
    p <- pr p
    return $ "(Exists-E " ++ p ++ ")"
   ImpliesE p1 p2 -> do
@@ -154,8 +154,8 @@ prProofEq ctx p =
    p <- prProofEq (ctx + 1) p
    return $ "(fun-ext " ++ p ++ ")"
 
-prProofEqSimp :: Int -> ProofEqSimp -> IO String
-prProofEqSimp ctx (Comp p _ _) =
+prProofEqSimp :: Int -> MetaProofEqSimp -> IO String
+prProofEqSimp ctx p =
  prMeta p $ \p -> case p of
   SimpLam em p -> do
    p <- prProofEq (ctx + 1) p
