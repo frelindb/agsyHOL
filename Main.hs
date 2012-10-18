@@ -1,10 +1,10 @@
 
-import Data.IORef
 import System.Environment
+import System.Exit
+import System.Process
+import Data.IORef
 import Control.Monad
 import System.Timeout
-import Control.Concurrent (forkIO, killThread, threadDelay)
-import System.IO
 import Data.Maybe
 
 import Syntax
@@ -20,183 +20,229 @@ import Transform
 import ProofExport
 
 
-parseFile :: String -> [TPTPInput]
-parseFile str =
- case parse str 1 of
-  FailP s -> error $ "Parse error: " ++ s
-  OkP x -> x
 
-getProb :: String -> String -> IO [ThfAnnotated]
+-- ---------------------------------
+
+getProb :: String -> String -> IO (ParseResult [ThfAnnotated])
 getProb axiomspath filename = do
  file <- readFile filename
- let prob = parseFile file
- expand prob
- where
- expand [] = return []
- expand (Include axfile : xs) = do
-  axprob <- getProb axiomspath (axiomspath ++ axfile)
-  xs <- expand xs
-  return (axprob ++ xs)
- expand (AnnotatedFormula x : xs) = expand xs >>= \xs -> return (x : xs)
+ case parse file 1 of
+  FailP err -> return $ FailP err
+  OkP prob ->
+   expand prob
+   where
+   expand [] = return $ OkP []
+   expand (Include axfile : xs) = do
+    axprob <- getProb axiomspath (axiomspath ++ axfile)
+    case axprob of
+     FailP err -> return $ FailP $ "in " ++ axiomspath ++ axfile ++ ": " ++ err
+     OkP axprob -> do
+      xs <- expand xs
+      case xs of
+       FailP err -> return $ FailP err
+       OkP xs -> return $ OkP (axprob ++ xs)
+   expand (AnnotatedFormula x : xs) = do
+    xs <- expand xs
+    case xs of
+     FailP err -> return $ FailP err
+     OkP xs -> return $ OkP (x : xs)
+
+-- ---------------------------------
 
 itdeepSearch :: (a -> IO Bool) -> Int -> Int -> (Int -> IO a) -> IO ()
 itdeepSearch stop depth step f = do
- --putStrLn $ show depth
  res <- f depth
  b <- stop res
  when (not b) $ itdeepSearch stop (depth + step) step f
 
-solveProb :: Bool -> Bool -> Maybe Int -> Problem -> IO Bool
-solveProb prodproof inter mdepth prob =
+solveProb :: Bool -> Bool -> Maybe Int -> Maybe Int -> Problem -> IO Bool
+solveProb doproof doagdaproof inter mdepth prob =
  case inter of
-  True ->
-   case prConjectures prob of
-    [conj] -> ssingconj [conj]
-    (conj : _) -> ssingconj [conj]
-    _ -> error "not one conjecture"
-  False -> do
-   res <- timeout (300 {-300-} {-1-} * 1000000) $
-    ssingconj (prConjectures prob)
-   return $ case res of
-    Nothing -> False
-    Just ok -> ok
+  Just idx ->
+   doconjs [prConjectures prob !! idx]
+  Nothing ->
+   doconjs (prConjectures prob)
  where
- ssingconj [] = return True
- ssingconj ((name, conj) : conjs) = do
-  putStrLn name
-  ticks <- newIORef 0  -- 500000
+ doconjs [] = return True
+ doconjs ((name, conj) : conjs) = do
+  ticks <- newIORef 0
   nsol <- newIORef 1
   prf <- initMeta
-  let hsol = {-return ()  -- -}prProof 0 prf >>= putStrLn
---              >> putStrLn "" >> agdaProof prob prf >>= putStrLn
-              >> when prodproof (agdaProof prob prf)  --  >>= writeFile ("Proof-" ++ prName prob ++ ".agda"))
+  let hsol = do when doproof $ putStrLn ("proof for " ++ name ++ ":") >> prProof 0 prf >>= putStrLn
+                when (doagdaproof && isNothing inter) $ agdaProof prob name prf
       p = andp (checkProof [] (cl conj) prf)
-               (sidecontrol prf (SCState {scsCtx = 0, scsHyps = [], scsNewHyp = NewGlobHyps{-, scsRAAok = True-}}))
+               (sidecontrol prf (SCState {scsCtx = 0, scsHyps = [], scsNewHyp = NewGlobHyps}))
       stop res = do
        nsol' <- readIORef nsol
-       ticks' <- readIORef ticks
-       return $ nsol' == 0 || res == False || ticks' == 0
-      ss d di = topSearch inter ticks nsol hsol (BIEnv (prGlobHyps prob)) p d di
+       return $ nsol' == 0 || res == False
+      ss d di = topSearch (isJust inter) ticks nsol hsol (BIEnv (prGlobHyps prob)) p d di
   case mdepth of
-   Just depth -> ss depth (depth + 1) >> return ()
-   Nothing -> case inter of
-    True -> ss 1000000 (1000000 + 1) >> return ()
-    False -> do
-     -- dumpstate hsol $
+   Just depth ->
+    ss depth (depth + 1) >> return ()
+   Nothing -> case isJust inter of
+    True ->
+     ss 100000000 (100000000 + 1) >> return ()
+    False ->
      itdeepSearch stop 999 1000 (\d -> ss d 1000)
-     return ()
-  ticks <- readIORef ticks
   nsol <- readIORef nsol
-  putStrLn $ show (-ticks, nsol)
-  hFlush stdout
   if nsol == 0 then
-    ssingconj conjs
+    doconjs conjs
    else
     return False
 
-getntrProb notransform axiomspath filename = do
- putStrLn filename
- tptpprob <- getProb axiomspath filename
- --putStrLn $ show tptpprob
- let probname = (reverse . takeWhile (/= '/') . drop 2 . reverse) filename
-     prob = translateProb probname tptpprob
-     trprob = transformProb (not notransform) prob
- return trprob
+-- ---------------------------------
 
-dooneproblem prodproof inter mdepth check trprob = do
- case check of
-  False ->
-   solveProb prodproof inter mdepth trprob
-  True -> do
---   pprob <- prProblem prob
---   putStrLn $ "translated problem:\n" ++ pprob
 
-   ptrprob <- prProblem trprob
-   putStrLn $ "transformed problem:\n" ++ ptrprob
+data CLArgs = CLArgs {
+ problemfile :: String,
+ fproof :: Bool,
+ finteractive :: Maybe Int,
+ fnotransform :: Bool,
+ fagdaproof :: Bool,
+ ftimeout :: Maybe Int,
+ fcheck :: Bool,
+ fdepth :: Maybe Int,
+ fincludedir :: String,
+ fshowproblem :: Bool
+}
 
-   putStrLn "checking globhyps of transformed problem:"
-   okhyps <- mapM (\gh -> do
-     putStr $ ghName gh
-     res <- runProp (checkForm [] typeBool $ ghForm gh)
-     putStrLn $ pres res
-     return $ noerrors res
-    ) (prGlobHyps trprob)
-   putStrLn "checking conjectures of transformed problem:"
-   okconjs <- mapM (\(cname, form) -> do
-     putStr cname
-     res <- runProp (checkForm [] typeBool form)
-     putStrLn $ pres res
-     return $ noerrors res
-    ) (prConjectures trprob)
-   return $ and (okhyps ++ okconjs)
- where
-  noerrors res = not $ '\"' `elem` res
-  pres res =
-   if '\"' `elem` res then
-    error $ " error: " ++ res
-   else
-    " ok"
+doit args = do
+ tptpprob <- getProb (fincludedir args) (problemfile args)
+ case tptpprob of
+  FailP err -> do
+   putStrLn err
+   putStrLn "parse error"
+  OkP tptpprob -> do
+   let probname = (reverse . takeWhile (/= '/') . drop 2 . reverse) (problemfile args)
+       prob = translateProb probname tptpprob
+       trprob = transformProb (not (fnotransform args)) prob
+   when (fshowproblem args) $ do
+    when (not (fnotransform args)) $ do
+     pprob <- prProblem prob
+     putStrLn $ "non-transformed problem:\n" ++ pprob
+    ptrprob <- prProblem trprob
+    putStrLn $ "problem:\n" ++ ptrprob
 
-dumpstate y x = do
- let pe = do threadDelay 2000000
-             y
-             putStrLn ""
-             pe
- tid <- forkIO pe
- res <- x
- killThread tid
- return res
+   case fcheck args of
+    False -> case prConjectures trprob of
+     [] -> putStrLn "no conjecture to prove"
+     _ -> do
+      res <- solveProb (fproof args) (fagdaproof args) (finteractive args) (fdepth args) trprob
+      case res of
+       True -> putStrLn "solution found"
+       False -> putStrLn "exhaustive search"
+    True -> do
+     when (fshowproblem args) $ putStrLn "checking globhyps:"
+     okhyps <- mapM (\gh -> do
+       res <- runProp (checkForm [] typeBool $ ghForm gh)
+       when (fshowproblem args) $ putStrLn $ ghName gh ++ pres res
+       return $ noerrors res
+      ) (prGlobHyps trprob)
 
+     when (fshowproblem args) $ putStrLn "checking conjectures:"
+     okconjs <- mapM (\(cname, form) -> do
+       res <- runProp (checkForm [] typeBool form)
+       when (fshowproblem args) $ putStrLn $ cname ++ pres res
+       return $ noerrors res
+      ) (prConjectures trprob)
+
+     case and (okhyps ++ okconjs) of
+      True -> putStrLn "check OK"
+      False -> putStrLn "check FAILED"
+
+     where
+      noerrors res = not $ '\"' `elem` res
+      pres res =
+       if '\"' `elem` res then
+        error $ " error: " ++ res
+       else
+        " ok"
 
 main = do
  args <- getArgs
- let (batch, filename, args1) = case args of
-      ("-batch" : f : flog : args) -> (Just flog, f, args)
-      (f : args) -> (Nothing, f, args)
-     (axiomspath, args2) = case args1 of
-      ("-idir" : p : args) -> (p, args)
-      args -> ("", args)
-     (prodproof, args21) = case args2 of
-      ("-prf" : args) -> (True, args)
-      args -> (False, args)
-     (notransform, args22) = case args21 of
-      ("-notransform" : args) -> (True, args)
-      args -> (False, args)
-     (inter, check, args3) = case args22 of
-              ("-int" : args) -> if isJust batch then
-                                          error "interactive not possible in batch mode"
-                                         else (True, False, args)
-              ("-check" : args) -> (False, True, args)
-              args -> (False, False, args)
-     (mdepth, []) = case args3 of
-      ("-depth" : depth : args) -> (Just (read depth), args)
-      args -> (Nothing, args)
- case batch of
-  Nothing -> do
-   trprob <- getntrProb notransform axiomspath filename
-   ok <- dooneproblem prodproof inter mdepth check trprob
-   when (not inter && not check && ok) $ putStrLn "**SUCCESS**"
-   return ()
-  Just logfilename -> do
-   nok <- newIORef (0 :: Int)
-   ntot <- newIORef (0 :: Int)
-   files <- liftM lines $ readFile filename
-   withFile logfilename WriteMode $ \hlogfile -> do
-    mapM_ (\filename ->
-      let filename' = takeWhile (/= ' ') filename
-      in  when (not $ null filename') $ do
-       trprob <- getntrProb notransform axiomspath filename'
-       ok <- dooneproblem prodproof inter mdepth check trprob
-       if ok then do
-         n <- readIORef nok
-         writeIORef nok $! n + 1
-        else
-         hPutStrLn hlogfile $ filename ++ " " ++ show (probsize trprob)
-       n <- readIORef ntot
-       writeIORef ntot $! n + 1
-     ) files
-    nok <- readIORef nok
-    ntot <- readIORef ntot
-    putStrLn $ "-----------------------------\n" ++ show nok ++ " / " ++ show ntot ++ " successful"
+ case consume "--tptp-mode" args of
+  Nothing ->
+   case ["--help"] == args of
+    False ->
+     case parseargs args of
+      Just args ->
+       case ftimeout args of
+        Nothing ->
+         doit args
+        Just seconds -> do
+         res <- timeout (seconds * 1000000) $ doit args
+         case res of
+          Just () -> return ()
+          Nothing -> putStrLn "time-out"
+      Nothing -> do
+       putStrLn "command argument error\n"
+       printusage
+    True ->
+     printusage
+  Just args ->
+   case parseargs args of
+    Nothing -> do
+     putStrLn "command argument error\n"
+     printusage
+    Just pargs -> do
+     prgname <- getExecutablePath
+     (exitcode, out, err) <-
+      readProcessWithExitCode
+       prgname
+       (args ++ ["+RTS", "-t", "-RTS"])
+       ""
+     let (status, comment) = case exitcode of
+                              ExitSuccess ->
+                               case last (lines out) of
+                                "parse error" -> ("Error", "parse error")
+                                "no conjecture to prove" -> ("Error", "no conjecture to prove")
+                                "solution found" -> ("Theorem", "")
+                                "exhaustive search" -> ("GaveUp", "")
+                                "time-out" -> ("Timeout", "")
+                              ExitFailure code ->
+                               ("Error", "program stopped abnormally, exitcode: " ++ show code)
+     putStrLn $ "% SZS status " ++ status ++ " for " ++ problemfile pargs ++ (if null comment then "" else (" : " ++ comment))
+     putStrLn out
+     putStrLn err
 
+parseargs = g (CLArgs {problemfile = "", fproof = False, finteractive = Nothing, fnotransform = False, fagdaproof = False, ftimeout = Nothing, fcheck = False, fdepth = Nothing, fincludedir = "", fshowproblem = False})
+ where
+  g a [] = if null (problemfile a) then Nothing else Just a
+  g a ("--proof" : xs) = g (a {fproof = True}) xs
+  g a ("--interactive" : n : xs) = g (a {finteractive = Just (read n)}) xs
+  g a ("--no-transform" : xs) = g (a {fnotransform = True}) xs
+  g a ("--agda-proof" : xs) = g (a {fagdaproof = True}) xs
+  g a ("--time-out" : n : xs) = g (a {ftimeout = Just (read n)}) xs
+  g a ("--check" : xs) = g (a {fcheck = True}) xs
+  g a ("--depth" : n : xs) = g (a {fdepth = Just (read n)}) xs
+  g a ("--include-dir" : s : xs) = if null (fincludedir a) then g (a {fincludedir = s}) xs else Nothing
+  g a ("--show-problem" : xs) = g (a {fshowproblem = True}) xs
+
+  g a (x : xs) = if null (problemfile a) then g (a {problemfile = x}) xs else Nothing
+
+consume y [] = Nothing
+consume y (x : xs) | x == y = Just xs
+consume y (x : xs) | otherwise =
+ case consume y xs of
+  Just xs -> Just (x : xs)
+  Nothing -> Nothing 
+
+printusage = putStr $
+ "usage:\n" ++
+ "agsyHOL <flags> file <flags>\n" ++
+ " file is a TPTP THF problem file.\n" ++
+ " flags:\n" ++
+ "  --tptp-mode      Call itself without this flag in order to catch errors and control rts options.\n" ++
+ "                   Output SZS classification.\n" ++
+ "  --proof          Output a proof (in internal format).\n" ++
+ "                   Note that some sub proofs can be printed although not all sub problems are solved.\n" ++
+ "  --interactive n  Do interactive search for subproblem n (n=0,1,2..).\n" ++
+ "  --no-transform   Do not transform problem. (Normally the number of negations is minimized.)\n" ++
+ "  --agda-proof     Save agda proof files named Proof-<probname>.agda and Proof-<probname>-subproof-<nn>.agda in current directory.\n" ++
+ "  --time-out n     Set timeout in seconds. (default: no time out)\n" ++
+ "  --check          Just check the problem for well formedness.\n" ++
+ "  --depth n        Set search depth. (default: iterated deepening for auto mode (start depth: 999, step: 1000), unlimited depth for interactive mode)\n" ++
+ "  --include-dir p  Set path to axiom files.\n" ++
+ "  --show-problem   Display original and transformed problem in internal format and, combined with --check, show check failure details.\n" ++
+ "  --help           Show this help.\n"
 

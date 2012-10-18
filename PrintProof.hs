@@ -63,7 +63,7 @@ prHyp ctx hyp =
  prMeta hyp $ \(Hyp elr _) ->
  case elr of
   HVar v -> return $ "#" ++ show (ctx - v - 1)
-  HGlob gh -> return $ ghName gh
+  HGlob gh -> return $ "<<" ++ ghName gh ++ ">>"
   AC typ qf p -> do
    typ <- prType $ Meta typ
    qf <- prForm ctx $ Meta qf
@@ -155,25 +155,30 @@ prProofEq ctx p =
    return $ "(fun-ext " ++ p ++ ")"
 
 prProofEqSimp :: Int -> MetaProofEqSimp -> IO String
-prProofEqSimp ctx p =
- prMeta p $ \p -> case p of
-  SimpLam em p -> do
-   p <- prProofEq (ctx + 1) p
-   return $ "(simp-lam " ++ pem em ++ p ++ ")"
-   where
-    pem EMNone = ""
-    pem EMLeft = "{- eta-conv lhs -} "
-    pem EMRight = "{- eta-conv rhs -} "
-  SimpCons c ps -> do
-   ps <- mapM (prProofEq ctx) ps
-   return $ "(simp-" ++ show c ++ concat (map (" " ++) ps) ++ ")"
-  SimpApp ps -> do
-   ps <- prProofEqs ctx ps
-   return $ "(simp-app" ++ ps ++ ")"
-  SimpChoice p ps -> do
-   p <- prProofEq ctx p
-   ps <- prProofEqs ctx ps
-   return $ "(simp-choice " ++ p ++ ps ++ ")"
+prProofEqSimp ctx p = do
+ os <- only_simp p
+ case os of
+  True ->
+   return $ "simp-all"
+  False ->
+   prMeta p $ \p -> case p of
+    SimpLam em p -> do
+     p <- prProofEq (ctx + 1) p
+     return $ "(simp-lam " ++ pem em ++ p ++ ")"
+     where
+      pem EMNone = ""
+      pem EMLeft = "{- eta-conv lhs -} "
+      pem EMRight = "{- eta-conv rhs -} "
+    SimpCons c ps -> do
+     ps <- mapM (prProofEq ctx) ps
+     return $ "(simp-" ++ show c ++ concat (map (" " ++) ps) ++ ")"
+    SimpApp ps -> do
+     ps <- prProofEqs ctx ps
+     return $ "(simp-app" ++ ps ++ ")"
+    SimpChoice p ps -> do
+     p <- prProofEq ctx p
+     ps <- prProofEqs ctx ps
+     return $ "(simp-choice " ++ p ++ ps ++ ")"
 
 prProofEqs :: Int -> MetaProofEqs -> IO String
 prProofEqs ctx p =
@@ -183,6 +188,37 @@ prProofEqs ctx p =
    p <- prProofEq ctx p
    ps <- prProofEqs ctx ps
    return $ " " ++ p ++ ps
+
+only_simp :: MetaProofEqSimp -> IO Bool
+only_simp p =
+ expandbind (Meta p) >>= \p -> case p of
+  Meta{} -> return False
+  NotM p -> case p of
+   SimpLam _ p -> h p
+   SimpCons _ ps -> do
+    bs <- mapM h ps
+    return $ and bs
+   SimpApp ps -> g ps
+   SimpChoice p ps -> do
+    b1 <- h p
+    b2 <- g ps
+    return $ b1 && b2
+ where
+  h p =
+   expandbind (Meta p) >>= \p -> case p of
+    Meta{} -> return False
+    NotM p -> case p of
+     Simp p -> only_simp p
+     _ -> return False
+  g ps =
+   expandbind (Meta ps) >>= \ps -> case ps of
+    Meta{} -> return False
+    NotM p -> case p of
+     PrEqNil -> return True
+     PrEqCons p ps -> do
+      b1 <- h p
+      b2 <- g ps
+      return $ b1 && b2
 
 prForm :: Int -> MFormula -> IO String
 prForm ctx f =
@@ -202,7 +238,7 @@ prForm ctx f =
    args <- prArgs ctx args
    let pelr = case elr of
               Var i -> "#" ++ show (ctx - i - 1)
-              Glob gv -> gvName gv
+              Glob gv -> "<<" ++ gvName gv ++ ">>"
    return $ "(" ++ pelr ++ pmuid muid ++ args ++ ")"
 
   NotM (Choice muid typ qf args) -> do
@@ -238,7 +274,7 @@ prProblem :: Problem -> IO String
 prProblem pr = do
  globvars <- mapM prGlobVar $ prGlobVars pr
  globhyps <- mapM prGlobHyp $ prGlobHyps pr
- conjs <- mapM (\(cn, form) -> prForm 0 form >>= \form -> return (cn ++ "\n" ++ form)) $ prConjectures pr
+ conjs <- mapM (\(cn, form) -> prForm 0 form >>= \form -> return (cn ++ " : " ++ form)) $ prConjectures pr
  return $ "global variables\n" ++ unlines globvars ++
           "\nglobal hypotheses\n" ++ unlines globhyps ++
           "\nconjectures\n" ++ unlines conjs

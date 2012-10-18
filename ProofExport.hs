@@ -7,6 +7,7 @@ import NarrowingSearch hiding (And)
 import Syntax
 import Check
 import Translate
+import PrintProof (prProof, prForm)
 
 chunksize = 5
 multiplefiles = True
@@ -15,8 +16,24 @@ multiplefiles = True
 data ECtxElt = Vr MType | Hp CFormula
 type ECtx = [ECtxElt]
 
-agdaProof :: Problem -> MetaProof -> IO ()
-agdaProof prob proof = do
+agdaProof :: Problem -> String -> MetaProof -> IO ()
+agdaProof fullprob conjname proof = do
+ prproof <- prProof 0 proof
+ let usedhyps = findusedglobs prproof
+     findusedglobs "" = []
+     findusedglobs ('<':'<':xs) = takeWhile (/= '>') xs : findusedglobs (dropWhile (/= '>') xs)
+     findusedglobs (x:xs) = findusedglobs xs
+     necessary_hyps = filter (\gh -> ghName gh `elem` usedhyps) (prGlobHyps fullprob)
+     Just tt = lookup conjname (prConjectures fullprob)
+ prhtypes <- mapM (prForm 0 . ghForm) necessary_hyps
+ prctype <- prForm 0 tt
+ let usedvars = findusedglobs (concat prhtypes ++ prctype)
+     necessary_vars = filter (\gv -> gvName gv `elem` usedvars) (prGlobVars fullprob)
+     prob = fullprob {prGlobVars = necessary_vars, prGlobHyps = necessary_hyps}
+ agdaProof_onlyusedhypsincluded prob conjname proof
+
+agdaProof_onlyusedhypsincluded :: Problem -> String -> MetaProof -> IO ()
+agdaProof_onlyusedhypsincluded prob conjname proof = do
  sis <- newIORef []
  subprfs <- newIORef []
  nsubprf <- newIORef 0
@@ -38,7 +55,7 @@ agdaProof prob proof = do
      writeIORef nsubprf $! subproofidx + 1
      etyp <- eCForm ctx etyp
      ctx <- eCtx ctx
-     let subproofname = "subproof-" ++ show subproofidx
+     let subproofname = (fixname conjname) ++ "-" ++ show subproofidx
          subprfdef = subproofname ++ " : _⊢_ {" ++ show (prIndSets prob + 1) ++ "} " ++ ctx ++ " " ++ etyp ++ "\n" ++ subproofname ++ " = " ++ subprf ++ "\n\n"
      modifyIORef subprfs ((subproofidx, subprfdef) :)
      return subproofname
@@ -85,7 +102,7 @@ agdaProof prob proof = do
      etyp <- eCForm ctx etyp
      ityp <- eCForm ctx ityp
      ctx <- eCtx ctx
-     let subproofname = "subproof-" ++ show subproofidx
+     let subproofname = (fixname conjname) ++ "-" ++ show subproofidx
          subprfdef = subproofname ++ " : _,_⊢_ {" ++ show (prIndSets prob + 1) ++ "} " ++ ctx ++ " " ++ ityp ++ " " ++ etyp ++ "\n" ++ subproofname ++ " = " ++ subprf ++ "\n\n"
      modifyIORef subprfs ((subproofidx, subprfdef) :)
      return subproofname
@@ -99,20 +116,21 @@ agdaProof prob proof = do
        condWrap (ctr > 0) ("(hn-ante " ++ show ctr ++ " _ _ ") ")" $
         eElimStep ctx etyp ityp p
 
-  eProofEqElim :: IORef (CFormula, CFormula) -> ECtx -> MType -> CFormula -> CFormula -> CFormula -> MetaProofEqElim -> IO String
-  eProofEqElim xx ctx typ lhs rhs ityp p = do
+  eProofEqElim :: IORef (CFormula, CFormula) -> ECtx -> MType -> CFormula -> MetaProofEqElim -> IO String
+  eProofEqElim xx ctx typ ityp p = do
    size <- ticksize 1
    if size <= 0 then do
      modifyIORef sis (chunksize :)
-     subprf <- eProofEqElim xx ctx typ lhs rhs ityp p
+     subprf <- eProofEqElim xx ctx typ ityp p
      modifyIORef sis tail
      subproofidx <- readIORef nsubprf
      writeIORef nsubprf $! subproofidx + 1
+     (lhs, rhs) <- readIORef xx
      lhs <- eCForm ctx lhs
      rhs <- eCForm ctx rhs
      ityp <- eCForm ctx ityp
      ctx <- eCtx ctx
-     let subproofname = "subproof-" ++ show subproofidx
+     let subproofname = (fixname conjname) ++ "-" ++ show subproofidx
          subprfdef = subproofname ++ " : _,_⊢_==_ {" ++ show (prIndSets prob + 1) ++ "} " ++ ctx ++ " " ++ ityp ++ " " ++ lhs ++ " " ++ rhs ++ "\n" ++ subproofname ++ " = " ++ subprf ++ "\n\n"
      modifyIORef subprfs ((subproofidx, subprfdef) :)
      return subproofname
@@ -131,12 +149,12 @@ agdaProof prob proof = do
       EqElimStep p -> do
        (ityp, ctr) <- headnormalize ityp
        condWrap (ctr > 0) ("(hn-ante-eq " ++ show ctr ++ " _ _ _ ") ")" $
-        eEqElimStep xx ctx typ lhs rhs ityp p
+        eEqElimStep xx ctx typ ityp p
 
-  eEqElimStep :: IORef (CFormula, CFormula) -> ECtx -> MType -> CFormula -> CFormula -> HNFormula -> MetaEqElimStep -> IO String
-  eEqElimStep xx ctx typ lhs rhs ityp p =
+  eEqElimStep :: IORef (CFormula, CFormula) -> ECtx -> MType -> HNFormula -> MetaEqElimStep -> IO String
+  eEqElimStep xx ctx typ ityp p =
    prMeta p $ \p -> case p of
-    NTEqElimStep p -> eNTElimStep (eProofEqElim xx ctx typ lhs rhs) ctx ityp p
+    NTEqElimStep p -> eNTElimStep (eProofEqElim xx ctx typ) ctx ityp p
 
   eElimStep :: ECtx -> CFormula -> HNFormula -> MetaElimStep -> IO String
   eElimStep ctx etyp ityp p =
@@ -170,7 +188,7 @@ agdaProof prob proof = do
          ityp' = CApp cf (Cl env $ NotM $ Choice nu typ mf (NotM ArgNil))
      p <- pr ityp' p
      cf <- eCForm ctx cf
-     return $ "(?'-E {_} {_} {_} {_} {" ++ cf ++ "} " ++ p ++ ")"
+     return $ "(?'-E {F = " ++ cf ++ "} " ++ p ++ ")"
     ImpliesE p1 p2 -> do
      let HNC _ Implies [F typ1, F typ2] = ityp
      p1 <- eProof ctx typ1 p1
@@ -182,22 +200,23 @@ agdaProof prob proof = do
      f <- eForm ctx $ Meta f
      p <- pr ityp' p
      return $ "(!'-E " ++ f ++ " " ++ p ++ ")"
-  {-
     InvBoolExtl p1 p2 -> do
-     p1 <- prProof ctx p1
-     p2 <- pr p2
-     return $ "(inv-bool-extl " ++ p1 ++ " " ++ p2 ++ ")"
+     let HNC _ Eq [T _, F lhs, F rhs] = ityp
+     p1 <- eProof ctx lhs p1
+     p2 <- pr rhs p2
+     return $ "(r-bool-ext (&-E-l (=>-E " ++ p1 ++ " " ++ p2 ++ ")))"
     InvBoolExtr p1 p2 -> do
-     p1 <- prProof ctx p1
-     p2 <- pr p2
-     return $ "(inv-bool-extr " ++ p1 ++ " " ++ p2 ++ ")"
+     let HNC _ Eq [T _, F lhs, F rhs] = ityp
+     p1 <- eProof ctx rhs p1
+     p2 <- pr lhs p2
+     return $ "(r-bool-ext (&-E-r (=>-E " ++ p1 ++ " " ++ p2 ++ ")))"
     InvFunExt f p -> do
-     f <- prForm ctx $ Meta f
-     p <- pr p
-     return $ "(inv-fun-ext " ++ f ++ " " ++ p ++ ")"
-  -}
-
-  -- TODO: Inv_Ext stuff
+     let HNC _ Eq [T typ, F lhs, F rhs] = ityp
+     ot <- expandbind typ >>= \typ -> return $ case typ of {NotM (Map _ ot) -> ot}
+     let ityp' = CHN (HNC nu Eq [T ot, F (CApp lhs (cl (Meta f))), F (CApp rhs (cl (Meta f)))])
+     f <- eForm ctx $ Meta f
+     p <- pr ityp' p
+     return $ "(r-fun-ext " ++ f ++ " " ++ p ++ ")"
 
   eIntro :: ECtx -> HNFormula -> MetaIntro -> IO String
   eIntro ctx etyp p =
@@ -256,7 +275,7 @@ agdaProof prob proof = do
      lhs <- eCForm ctx lhs
      rhs <- eCForm ctx rhs
      ctx <- eCtx ctx
-     let subproofname = "subproof-" ++ show subproofidx
+     let subproofname = (fixname conjname) ++ "-" ++ show subproofidx
          subprfdef = subproofname ++ " : _⊢_∋_==_ {" ++ show (prIndSets prob + 1) ++ "} " ++ ctx ++ " " ++ typ ++ " " ++ lhs ++ " " ++ rhs ++ "\n" ++ subproofname ++ " = " ++ subprf ++ "\n\n"
      modifyIORef subprfs ((subproofidx, subprfdef) :)
      return subproofname
@@ -268,7 +287,7 @@ agdaProof prob proof = do
       Step hyp elimp simpp eqp -> do
        (hyp1, hyp2, ityp) <- eHyp ctx hyp True
        xx <- newIORef (error "this value set by eProofEqElim")
-       elimp <- eProofEqElim xx ctx typ lhs rhs ityp elimp
+       elimp <- eProofEqElim xx ctx typ ityp elimp
        (lhs', rhs') <- readIORef xx
        simpp <- eProofEqSimp ctx typ lhs lhs' simpp
        eqp <- eProofEq ctx typ rhs' rhs eqp
@@ -291,16 +310,29 @@ agdaProof prob proof = do
    condWrap (ctr1 > 0) ("(hn-left " ++ show ctr1 ++ " _ _ ") ")" $
     condWrap (ctr2 > 0) ("(hn-right " ++ show ctr2 ++ " _ _ ") ")" $
     prMeta p $ \p -> case p of
-     SimpLam em p -> do
-      let HNLam _ _ lbdy = lhs
-          HNLam _ _ rbdy = rhs
-          NotM (Map it ot) = typ
-      p <- eProofEq (Vr it : ctx) ot lbdy rbdy p
-      return $ "(head-lam" ++ pem em ++ " _ _ _ _ " ++ p ++ ")"
-      where
-       pem EMNone = ""
-       pem EMLeft = "-eta-left"
-       pem EMRight = "-eta-right"
+     SimpLam em p ->
+      case (lhs, rhs, em) of
+       (HNLam _ _ lbdy, HNLam _ _ rbdy, EMNone) -> do
+        p <- eProofEq (Vr it : ctx) ot lbdy rbdy p
+        return $ "(head-lam _ _ _ _ " ++ p ++ ")"
+       (HNApp _ lelr largs, HNLam _ _ rbdy, EMLeft) -> do
+        p <- eProofEq (Vr it : ctx) ot lbdy rbdy p
+        return $ "(head-lam-eta-left _ _ _ _ " ++ p ++ ")"
+        where
+         lelr' = case lelr of
+                  Var i -> Var (i + 1)
+                  Glob g -> Glob g
+         lbdy = CHN (HNApp nu lelr' (map (\(ClA env x) -> ClA (Lift 1 : env) x) largs ++ [ClA [] $ NotM $ ArgCons (NotM $ App nu (Var 0) $ NotM ArgNil) (NotM ArgNil)]))
+       (HNLam _ _ lbdy, HNApp _ relr rargs, EMRight) -> do
+        p <- eProofEq (Vr it : ctx) ot lbdy rbdy p
+        return $ "(head-lam-eta-right _ _ _ _ " ++ p ++ ")"
+        where
+         relr' = case relr of
+                  Var i -> Var (i + 1)
+                  Glob g -> Glob g
+         rbdy = CHN (HNApp nu relr' (map (\(ClA env x) -> ClA (Lift 1 : env) x) rargs ++ [ClA [] $ NotM $ ArgCons (NotM $ App nu (Var 0) $ NotM ArgNil) (NotM ArgNil)]))
+      where        
+       NotM (Map it ot) = typ
      SimpCons Top [] ->
       return "(head-const _ $true)"
      SimpCons Bot [] ->
@@ -336,9 +368,8 @@ agdaProof prob proof = do
      SimpCons Exists [p] -> do
       let HNC _ Exists [T qtyp, F lqf] = lhs
           HNC _ Exists [_, F rqf] = rhs
-      p <- eProofEq ctx (NotM $ Map qtyp typ) lqf rqf p
+      p <- eProofEq (Vr qtyp : ctx) (NotM $ Map qtyp typ) (lift 1 lqf) (lift 1 rqf) p
       return $ "(head-~ (simp (head-app _ _ _ _ _ _ (simp (head-const _ Π)) (simp (head-lam _ _ _ _ (simp (head-~ (simp (head-app _ _ _ _ _ _ " ++ p ++ " (simp (head-var _ _ _)))))))))))"
-      -- TODO: how to handle the 'weak F' in the def of '?'[_]_' ? Need to keep track of it or solved because var indeces are not explicit?
      SimpCons Eq [p1, p2] -> do
       let HNC _ Eq [T qtyp, F llhs, F rlhs] = lhs
           HNC _ Eq [_, F lrhs, F rrhs] = rhs
@@ -374,13 +405,14 @@ agdaProof prob proof = do
 
  pvars <- mapM dovar (prGlobVars prob)
  phyps <- mapM dohyp (prGlobHyps prob)
- pconjs <- case prConjectures prob of {[conj] -> mapM doconj [conj]; _ -> error "not one conjecture"}
- let [(_, tt)] = prConjectures prob
+ let Just tt = lookup conjname (prConjectures prob)
+ pconj <- doconj (conjname, tt)
  writeIORef sis [chunksize]
  proof <- eProof [] (cl tt) proof
  subprfs <- readIORef subprfs
- writeFile ("Proof-" ++ prName prob ++ ".agda") $
-  "module Proof-" ++ prName prob ++ " where\n" ++
+ putStrLn ("Proof-" ++ prName prob ++ "-" ++ (fixname conjname) ++ ".agda")
+ writeFile ("Proof-" ++ prName prob ++ "-" ++ (fixname conjname) ++ ".agda") $
+  "module Proof-" ++ prName prob ++ "-" ++ (fixname conjname) ++ " where\n" ++
   "\n" ++
   "open import StdLibStuff\n" ++
   "\n" ++
@@ -397,14 +429,14 @@ agdaProof prob proof = do
     "") ++
   concat pvars ++
   concat phyps ++
-  concat pconjs ++
+  pconj ++
   (if multiplefiles then "" else concat (reverse (map snd subprfs))) ++
   "proof : ⊢ " ++ prop2 (prGlobVars prob) ++ "\n" ++
   "proof = sound-top _ " ++ wrapProof2 (prGlobVars prob) proof ++ "\n"
  when multiplefiles $
   mapM_ (\(idx, p) ->
-   writeFile ("Proof-" ++ prName prob ++ "-subproof-" ++ show idx ++ ".agda") $
-    "module Proof-" ++ prName prob ++ "-subproof-" ++ show idx ++ " where\n" ++
+   writeFile ("Proof-" ++ prName prob ++ "-" ++ (fixname conjname) ++ "-" ++ show idx ++ ".agda") $
+    "module Proof-" ++ prName prob ++ "-" ++ (fixname conjname) ++ "-" ++ show idx ++ " where\n" ++
     "\n" ++
     "open import StdLibStuff\n" ++
     "\n" ++
@@ -420,11 +452,11 @@ agdaProof prob proof = do
   importsubproofs :: String -> String -> String
   importsubproofs me s =
    concatMap (\idx ->
-    "open import Proof-" ++ prName prob ++ "-subproof-" ++ idx ++ "\n"
+    "open import Proof-" ++ prName prob ++ "-" ++ (fixname conjname) ++ "-" ++ idx ++ "\n"
    ) $ gg s
    where
-    gg s | take 9 s == "subproof-" =
-     let (idx, s') = span (\c -> c >= '0' && c <= '9') $ drop 9 s
+    gg s | take (1 + length (fixname conjname)) s == (fixname conjname) ++ "-" =
+     let (idx, s') = span (\c -> c >= '0' && c <= '9') $ drop (1 + length (fixname conjname)) s
          sps = gg s'
      in  if elem idx sps || idx == me then sps else (idx : sps)
     gg (c:s) = gg s
@@ -449,12 +481,11 @@ agdaProof prob proof = do
     "VAR-" ++ fixname (gvName var) ++ " : Type " ++ show (prIndSets prob + 1) ++ "\n" ++
     "VAR-" ++ fixname (gvName var) ++ " = " ++ ptype ++ "\n" ++
     "\n"
-  [(theconjname, _)] = prConjectures prob
 
   prop2 (var : vars) = "(![ VAR-" ++ fixname (gvName var) ++ " ] " ++ prop2 vars ++ ")"
   prop2 [] = prop (prGlobHyps prob)
   prop (hyp : hyps) = "(HYP-" ++ fixname (ghName hyp) ++ " => " ++ prop hyps ++ ")"
-  prop [] = "CONJ-" ++ fixname theconjname
+  prop [] = "CONJ-" ++ fixname (fixname conjname)
 
   wrapProof2 (var : vars) p = "(!-I " ++ wrapProof2 vars p ++ ")"
   wrapProof2 [] p = wrapProof (prGlobHyps prob) p
@@ -589,8 +620,25 @@ agdaProof prob proof = do
   eCForm ctx (CNot c) = do
    c <- eCForm ctx c
    return $ "(~ " ++ c ++ ")"
-  eCForm _ (CHN _) = return "<CHN>"
-   
+  eCForm ctx (CHN (HNC _ Eq [T _, F lhs, F rhs])) = do
+   lhs <- eCForm ctx lhs
+   rhs <- eCForm ctx rhs
+   return $ "(" ++ lhs ++ " == " ++ rhs ++ ")"
+  eCForm ctx (CHN (HNApp _ elr args)) = do
+   pelr <- case elr of
+            Var i -> return $ "($ " ++ prVar ctx i ++ " {refl})"
+            Glob gv -> return $ "($ " ++ prGVar ctx (gvName gv) ++ "{- " ++ fixname (gvName gv) ++ " -} {refl})"
+   wrapArgs pelr args
+   where
+    wrapArgs :: String -> [CArgs] -> IO String
+    wrapArgs c xs = do
+     xs <- headnormalizeargs xs
+     case xs of
+      HNNil -> return c
+      HNCons x xs -> do
+       x <- eCForm ctx x
+       wrapArgs ("(" ++ c ++ " · " ++ x ++ ")") xs
+
 
   eCtx :: ECtx -> IO String
   eCtx ctx = dgv "ε" $ prGlobVars prob
@@ -685,7 +733,7 @@ prNat n = "(suc " ++ prNat (n - 1) ++ ")"
 
 
 fixname [] = []
-fixname ('_':xs) = '-':xs
+fixname ('_':xs) = '-' : fixname xs
 fixname (x:xs) = x : fixname xs
 
 condWrap :: Bool -> String -> String -> IO String -> IO String
