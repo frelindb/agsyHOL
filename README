@@ -35,7 +35,7 @@ Prerequisites
 ---------------------------------------------------------------------
 
 To build agsyHOL you need
- ghc (version 7.6.1 or later) [http://www.haskell.org/ghc/]
+ ghc [http://www.haskell.org/ghc/]
 
 If you want to manipulate the soundness proof or check automatically
 generated proofs you need
