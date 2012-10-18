@@ -2,32 +2,32 @@
 ++                             agsyHOL                             ++
 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
-is a theorem prover for higher-order logic.
-It reads problems in the TPTP THF format. It is based on a generic
-lazy narrowing search algorithm applied to a proof checker for a HOL
-proof term language. The term language is designed with proof search
-in mind. The proof checker is annotated with search control
-information, such as priorities controlling the order of sub proof
-term instantiation. The search is based on back-tracking and is
-characterised by a typically small search state, making it suitable
-for parallelization (not realized yet).
+agsyHol is a theorem prover for higher-order logic. It reads problems
+in the TPTP THF format. It is based on a generic lazy narrowing
+search algorithm applied to a proof checker for a HOL proof term
+language. The term language is designed with proof search in mind.
+The proof checker is annotated with search control information, such
+as priorities controlling the order of sub proof term instantiation.
+The search is based on back-tracking and is characterised by a
+typically small search state, making it suitable for parallelization
+(not realized yet).
 
 On success the proof term constituting the solution can be displayed.
-Proof terms are a kind of sequent calculus derivations but not
-printed in a user friendly format. Showing derivations in TPTP format
+Proof terms are a kind of sequent calculus derivations and are so far
+only printed in internal format. Showing derivations in TPTP format
 has not been implemented yet. Hence the reported SZS dataform
-category is not Proof or Derivation, although a proof is printed.
+category is not Proof or Derivation, although a proof is reported.
 
 Soundness of the proof language has been established in Agda, a
 dependently typed programming language. The theorem prover can output
 solutions in Agda format, enabling checking the validity
-independently and relative to the formalised soundness proof.
+independently and against the formalised soundness proof.
 
 Before proof search begins the problem is transformed in order to
 reduce the need for reasoning by RAA. Double negations are removed
 and de Morgan laws applied to reduce the number of negations.
-Reasoning by RAA is costly for agsyHOL. The constructed Agda proofs
-do currently not include this transformation step.
+Reasoning by RAA is costly for agsyHOL. Constructed Agda proofs for
+problems do currently not include this transformation step.
 
 
 ---------------------------------------------------------------------
@@ -76,8 +76,19 @@ Soundness Proof
 Soundness is proved with respect to Church's simple type theory, STT.
 The deductive system of the proof language is called FSC, and is a
 variant of focused sequent calculus. The proof is found in the sub
-directory called 'soundness'. The formalization uses de Bruijn
+directory called 'soundness'. The formalisation uses de Bruijn
 indeces. The main result is 'sound-top', located in the file
 'Soundness.agda'. When checking Agda proofs constructed by agsyHOL,
 the 'soundness' directory must be in scope.
+
+
+---------------------------------------------------------------------
+Contact
+---------------------------------------------------------------------
+
+For questions, comments, bug reports, please contact
+
+ Fredrik Lindblad <fredrik.lindblad@chalmers.se>
+
+If you use agsyHOL or the code, I'd be very happy if you let me know.
 
