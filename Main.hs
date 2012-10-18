@@ -7,6 +7,7 @@ import Control.Monad
 import System.Timeout
 import Data.Maybe
 
+import GetFullProgName
 import Syntax
 import NarrowingSearch
 import SearchControl
@@ -185,7 +186,7 @@ main = do
      putStrLn "command argument error\n"
      printusage
     Just pargs -> do
-     prgname <- getExecutablePath
+     prgname <- getFullProgName
      (exitcode, out, err) <-
       readProcessWithExitCode
        prgname
