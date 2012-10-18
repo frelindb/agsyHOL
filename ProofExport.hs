@@ -744,7 +744,7 @@ condWrap False _ _ c = c
 
 headnormalize :: CFormula -> IO (HNFormula, CompTrace)
 headnormalize f =
- compute f >>= \(NotB x) -> return x
+ compute (-1) f >>= \(NotB (f, steps)) -> return (f, (-1) - steps)
 
 headnormalizeargs :: [CArgs] -> IO HNArgs
 headnormalizeargs xs =
@@ -753,7 +753,7 @@ headnormalizeargs xs =
 
 normalize :: CFormula -> IO MFormula
 normalize cform =
- compute cform >>= \(NotB (hnform, _)) ->
+ compute (-1) cform >>= \(NotB (hnform, _)) ->
  case hnform of
   HNC muid c as -> do
    as <- mapM (\a -> case a of

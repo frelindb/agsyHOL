@@ -182,6 +182,8 @@ type HandleSol = IO ()
 lowestPrio = 0
 highestPrio = 7
 
+defaultCost = 1
+
 -- NOTE: ticks are counted down instead of up and execution stopped when 0 is reached
 topSearch :: forall blk . Bool -> IORef Int -> IORef Int -> HandleSol -> blk -> MetaEnv (PB blk) -> Int -> Int -> IO Bool
 topSearch interactive ticks nsol hsol envinfo p searchdepth depthinterval = do
@@ -193,11 +195,8 @@ topSearch interactive ticks nsol hsol envinfo p searchdepth depthinterval = do
  depth <- newIORef searchdepth
 
  let
-  r :: forall a . Int -> Undo ()
-
-  r ddepth | ddepth == 100000 = {-lift (putStr "inf?"{-putStrLn "narrsearch infinite rec depth?"-}) >> lift hsol >> {-error "narrsearch infinite rec depth?"-}-} return ()
-
-  r ddepth = do
+  r :: forall a . Undo ()
+  r = do
    res <- findrefmeta
    case res of
     Nothing -> do  -- sol found (or no principal constraints)
@@ -218,7 +217,7 @@ topSearch interactive ticks nsol hsol envinfo p searchdepth depthinterval = do
      let
       refine (cost, ref, _) = do
        depth_ <- readIORef depth
-       if depth_ < cost then do
+       if depth_ < cost + defaultCost then do
          b <- readIORef depthreached
          when (not b) $ NoUndo.writeIORef depthreached True
         else do
@@ -232,11 +231,11 @@ topSearch interactive ticks nsol hsol envinfo p searchdepth depthinterval = do
            runUndo $ do
             uwriteIORef midcp midc'
             uwriteIORef (mbind m) (Just bind)
-            uwriteIORef depth (depth_ - cost)
+            uwriteIORef depth (depth_ - cost - defaultCost)
             res <- recalcs obss
             case res of
              False -> return ()
-             True -> r (ddepth + 1)
+             True -> r
 
       f [] = return ()
       f (ref : refs) = do
@@ -370,9 +369,11 @@ topSearch interactive ticks nsol hsol envinfo p searchdepth depthinterval = do
      recalcs ps
 
   recalc :: Node (Prio, AnyMeta blk) -> MetaEnv (PB blk) -> Undo Bool
-  recalc iptr = f 0
+  recalc iptr p = do
+   depth_ <- lift $ readIORef depth
+   f depth_ p  -- limit the recursive calls
    where
-    f fdep _ | fdep == 1000 = return False
+    f 0 _ = return False
     f fdep p = do
      res <- lift p
      case res of
@@ -383,10 +384,10 @@ topSearch interactive ticks nsol hsol envinfo p searchdepth depthinterval = do
         lift (putStrLn msg >> getChar)
         return False
        And p1 p2 -> do
-        res <- f (fdep + 1) p1
+        res <- f (fdep - 1) p1
         case res of
          False -> return res
-         True -> f (fdep + 1) p2
+         True -> f (fdep - 1) p2
        Cost c p -> do
         depth_ <- ureadIORef depth
         if depth_ < c then do
@@ -395,7 +396,7 @@ topSearch interactive ticks nsol hsol envinfo p searchdepth depthinterval = do
           return False
          else do
           uwriteIORef depth (depth_ - c)
-          f (fdep + 1) p
+          f (fdep - 1) p
       PBlocked m (princ, prio, mbinfo) cont pr -> do
        node <- insertBefore (prio, AnyMeta m) iptr
        umodifyIORef (mobs m) ((Nothing, cont, node, pr) :)
@@ -419,7 +420,7 @@ topSearch interactive ticks nsol hsol envinfo p searchdepth depthinterval = do
   res <- recalc (insertLast conslist) p
   case res of
    False -> return ()  -- immediately false
-   True -> r 0
+   True -> r
  b <- readIORef depthreached
  return b
 

@@ -70,12 +70,12 @@ solveProb doproof doagdaproof inter mdepth prob =
   prf <- initMeta
   let hsol = do when doproof $ putStrLn ("proof for " ++ name ++ ":") >> prProof 0 prf >>= putStrLn
                 when (doagdaproof && isNothing inter) $ agdaProof prob name prf
-      p = andp (checkProof [] (cl conj) prf)
-               (sidecontrol prf (SCState {scsCtx = 0, scsHyps = [], scsNewHyp = NewGlobHyps}))
+      p d = andp (checkProof d [] (cl conj) prf)
+                 (sidecontrol prf (SCState {scsCtx = 0, scsHyps = [], scsNewHyp = NewGlobHyps}))
       stop res = do
        nsol' <- readIORef nsol
        return $ nsol' == 0 || res == False
-      ss d di = topSearch (isJust inter) ticks nsol hsol (BIEnv (prGlobHyps prob)) p d di
+      ss d di = topSearch (isJust inter) ticks nsol hsol (BIEnv (prGlobHyps prob)) (p d) d di
   case mdepth of
    Just depth ->
     ss depth (depth + 1) >> return ()
