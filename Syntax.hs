@@ -1,4 +1,8 @@
+{-# LANGUAGE MultiParamTypeClasses, TypeSynonymInstances, FlexibleInstances #-}
+
 module Syntax where
+
+import Control.Monad
 
 import NarrowingSearch
 
@@ -261,4 +265,295 @@ probsize pr = sum (map sgv (prGlobVars pr)) + sum (map sgh (prGlobHyps pr)) + su
  sa2 (NotM (ArgCons f as)) = sf f + sa2 as
  st t = 0
 
+-- ------------------------------
+
+instance ExpandMetas MType where
+ expandmetas t =
+  expandmm t $ \t -> case t of
+   Map t1 t2 -> do
+    t1 <- expandmetas t1
+    t2 <- expandmetas t2
+    return $ NotM $ Map t1 t2
+   _ ->
+    return $ NotM t
+
+instance ExpandMetas MFormula where
+ expandmetas f =
+  expandmm f $ \f -> case f of
+   C uid c as -> do
+    as <- mapM (\a -> case a of
+                       F f -> liftM F $ expandmetas f
+                       T t -> liftM T $ expandmetas t)
+               as
+    return $ NotM $ C uid c as
+   App uid elr as -> do
+    as <- expandmetas as
+    return $ NotM $ App uid elr as
+   Choice uid t f as -> do
+    t <- expandmetas t
+    f <- expandmetas f
+    as <- expandmetas as
+    return $ NotM $ Choice uid t f as
+   Lam uid t f -> do
+    t <- expandmetas t
+    f <- expandmetas f
+    return $ NotM $ Lam uid t f
+
+instance ExpandMetas MArgs where
+ expandmetas f =
+  expandmm f $ \f -> case f of
+   ArgNil ->
+    return $ NotM ArgNil
+   ArgCons f fs -> do
+    f <- expandmetas f
+    fs <- expandmetas fs
+    return $ NotM $ ArgCons f fs
+
+
+instance ExpandMetas CFormula where
+ expandmetas cf =
+  case cf of
+   Cl env f -> do
+    env <- expandmetas env
+    f <- expandmetas f
+    return $ Cl env f
+   CApp f1 f2 -> do
+    f1 <- expandmetas f1
+    f2 <- expandmetas f2
+    return $ CApp f1 f2
+   CNot f -> do
+    f <- expandmetas f
+    return $ CNot f
+   CHN f -> do
+    f <- expandmetas f
+    return $ CHN f
+
+instance ExpandMetas Env where
+ expandmetas = mapM g
+  where
+   g (Sub f) = do
+    f <- expandmetas f
+    return $ Sub f
+   g x =
+    return x
+
+instance ExpandMetas HNFormula where
+ expandmetas f =
+  case f of
+   HNC uid c as -> do
+    as <- mapM (\a -> case a of
+                       F f -> liftM F $ expandmetas f
+                       T t -> liftM T $ expandmetas t)
+               as
+    return $ HNC uid c as
+   HNApp uid elr as -> do
+    as <- mapM g as
+    return $ HNApp uid elr as
+   HNChoice uid t f as -> do
+    t <- expandmetas t
+    f <- expandmetas f
+    as <- mapM g as
+    return $ HNChoice uid t f as
+   HNLam uid t f -> do
+    t <- expandmetas t
+    f <- expandmetas f
+    return $ HNLam uid t f
+  where
+   g (ClA env as) = do
+    env <- expandmetas env
+    as <- expandmetas as
+    return $ ClA env as
+
+
+instance ExpandMetas MetaType where
+ expandmetas t = do
+  NotM t <- expandmetas (Meta t)
+  crmeta t
+
+instance ExpandMetas MetaFormula where
+ expandmetas f = do
+  NotM f <- expandmetas (Meta f)
+  crmeta f
+
+instance ExpandMetas MetaProof where
+ expandmetas p =
+  expandmeta p $ \p -> case p of
+   Intro p -> do
+    p <- expandmetas p
+    crmeta $ Intro p
+   Elim h p -> do
+    h <- expandmetas h
+    p <- expandmetas p
+    crmeta $ Elim h p
+   RAA p -> undefined
+
+instance ExpandMetas MetaIntro where
+ expandmetas p =
+  expandmeta p $ \p -> case p of
+   OrIl p -> do
+    p <- expandmetas p
+    crmeta $ OrIl p
+   OrIr p -> do
+    p <- expandmetas p
+    crmeta $ OrIr p
+   AndI p1 p2 -> do
+    p1 <- expandmetas p1
+    p2 <- expandmetas p2
+    crmeta $ AndI p1 p2
+   ExistsI f p -> do
+    f <- expandmetas f
+    p <- expandmetas p
+    crmeta $ ExistsI f p
+   ImpliesI p -> do
+    p <- expandmetas p
+    crmeta $ ImpliesI p
+   NotI p -> do
+    p <- expandmetas p
+    crmeta $ NotI p
+   ForallI p -> do
+    p <- expandmetas p
+    crmeta $ ForallI p
+   TopI ->
+    crmeta TopI
+   EqI p -> do
+    p <- expandmetas p
+    crmeta $ EqI p
+
+instance ExpandMetas MetaProofElim where
+ expandmetas p =
+  expandmeta p $ \p -> case p of
+   Use p -> do
+    p <- expandmetas p
+    crmeta $ Use p
+   ElimStep p -> do
+    p <- expandmetas p
+    crmeta $ ElimStep p
+
+instance ExpandMetas MetaElimStep where
+ expandmetas p =
+  expandmeta p $ \p -> case p of
+   BotE ->
+    crmeta BotE
+   NotE p -> do
+    p <- expandmetas p
+    crmeta $ NotE p
+   OrE p1 p2 -> do
+    p1 <- expandmetas p1
+    p2 <- expandmetas p2
+    crmeta $ OrE p1 p2
+   NTElimStep p -> do
+    p <- expandmetas p
+    crmeta $ NTElimStep p
+
+instance ExpandMetas MetaProofEqElim where
+ expandmetas p =
+  expandmeta p $ \p -> case p of
+   UseEq ->
+    crmeta UseEq
+   UseEqSym ->
+    crmeta UseEqSym
+   EqElimStep p -> do
+    p <- expandmetas p
+    crmeta $ EqElimStep p
+
+instance ExpandMetas MetaEqElimStep where
+ expandmetas p =
+  expandmeta p $ \p -> case p of
+   NTEqElimStep p -> do
+    p <- expandmetas p
+    crmeta $ NTEqElimStep p
+
+instance ExpandMetas a => ExpandMetas (NTElimStep a) where
+ expandmetas p =
+  case p of
+   AndEl p -> do
+    p <- expandmetas p
+    return $ AndEl p
+   AndEr p -> do
+    p <- expandmetas p
+    return $ AndEr p
+   ExistsE p -> do
+    p <- expandmetas p
+    return $ ExistsE p
+   ImpliesE p1 p2 -> do
+    p1 <- expandmetas p1
+    p2 <- expandmetas p2
+    return $ ImpliesE p1 p2
+   ForallE f p -> do
+    f <- expandmetas f
+    p <- expandmetas p
+    return $ ForallE f p
+   InvBoolExtl p1 p2 -> do
+    p1 <- expandmetas p1
+    p2 <- expandmetas p2
+    return $ InvBoolExtl p1 p2
+   InvBoolExtr p1 p2 -> do
+    p1 <- expandmetas p1
+    p2 <- expandmetas p2
+    return $ InvBoolExtr p1 p2
+   InvFunExt f p -> do
+    f <- expandmetas f
+    p <- expandmetas p
+    return $ InvFunExt f p
+   
+instance ExpandMetas MetaProofEq where
+ expandmetas p =
+  expandmeta p $ \p -> case p of
+   Simp p -> do
+    p <- expandmetas p
+    crmeta $ Simp p
+   Step h p1 p2 p3 -> do
+    h <- expandmetas h
+    p1 <- expandmetas p1
+    p2 <- expandmetas p2
+    p3 <- expandmetas p3
+    crmeta $ Step h p1 p2 p3
+   BoolExt p1 p2 -> do
+    p1 <- expandmetas p1
+    p2 <- expandmetas p2
+    crmeta $ BoolExt p1 p2
+   FunExt p -> do
+    p <- expandmetas p
+    crmeta $ FunExt p
+
+instance ExpandMetas MetaProofEqs where
+ expandmetas p =
+  expandmeta p $ \p -> case p of
+   PrEqNil ->
+    crmeta PrEqNil
+   PrEqCons p ps -> do
+    p <- expandmetas p
+    ps <- expandmetas ps
+    crmeta $ PrEqCons p ps
+
+instance ExpandMetas MetaProofEqSimp where
+ expandmetas p =
+  expandmeta p $ \p -> case p of
+   SimpCons c ps -> do
+    ps <- mapM expandmetas ps
+    crmeta $ SimpCons c ps
+   SimpApp ps -> do
+    ps <- expandmetas ps
+    crmeta $ SimpApp ps
+   SimpChoice p ps -> do
+    p <- expandmetas p
+    ps <- expandmetas ps
+    crmeta $ SimpChoice p ps
+   SimpLam em p -> do
+    p <- expandmetas p
+    crmeta $ SimpLam em p
+
+instance ExpandMetas MetaHyp where
+ expandmetas p =
+  expandmeta p $ \p -> case p of
+   Hyp elr cf -> do
+    elr <- case elr of
+            AC typ qf p -> do
+             typ <- expandmetas typ
+             qf <- expandmetas qf
+             p <- expandmetas p
+             return $ AC typ qf p
+            _ -> return elr
+    cf <- expandmetas cf
+    crmeta $ Hyp elr cf
 

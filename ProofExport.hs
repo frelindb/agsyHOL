@@ -9,26 +9,39 @@ import Check
 import Translate
 import PrintProof (prProof, prForm)
 
-chunksize = 5
-multiplefiles = True
-
 
 data ECtxElt = Vr MType | Hp CFormula
 type ECtx = [ECtxElt]
 
+findusedglobs :: String -> [String]
+findusedglobs "" = []
+findusedglobs ('<':'<':xs) = takeWhile (/= '>') xs : findusedglobs (dropWhile (/= '>') xs)
+findusedglobs (x:xs) = findusedglobs xs
+
+findusedglobsProof :: MetaProof -> IO [String]
+findusedglobsProof proof = do
+ prproof <- prProof 0 proof
+ return $ findusedglobs prproof
+
+findusedglobsFormula :: MFormula -> IO [String]
+findusedglobsFormula form = do
+ prform <- prForm 0 form
+ return $ findusedglobs prform
+
+
+-- ---------------------------
+
+chunksize = 5
+multiplefiles = True
+
+
 agdaProof :: Problem -> String -> MetaProof -> IO ()
 agdaProof fullprob conjname proof = do
- prproof <- prProof 0 proof
- let usedhyps = findusedglobs prproof
-     findusedglobs "" = []
-     findusedglobs ('<':'<':xs) = takeWhile (/= '>') xs : findusedglobs (dropWhile (/= '>') xs)
-     findusedglobs (x:xs) = findusedglobs xs
-     necessary_hyps = filter (\gh -> ghName gh `elem` usedhyps) (prGlobHyps fullprob)
+ usedhyps <- findusedglobsProof proof
+ let necessary_hyps = filter (\gh -> ghName gh `elem` usedhyps) (prGlobHyps fullprob)
      Just tt = lookup conjname (prConjectures fullprob)
- prhtypes <- mapM (prForm 0 . ghForm) necessary_hyps
- prctype <- prForm 0 tt
- let usedvars = findusedglobs (concat prhtypes ++ prctype)
-     necessary_vars = filter (\gv -> gvName gv `elem` usedvars) (prGlobVars fullprob)
+ usedvars <- liftM concat $ mapM findusedglobsFormula (tt : map ghForm necessary_hyps)
+ let necessary_vars = filter (\gv -> gvName gv `elem` usedvars) (prGlobVars fullprob)
      prob = fullprob {prGlobVars = necessary_vars, prGlobHyps = necessary_hyps}
  agdaProof_onlyusedhypsincluded prob conjname proof
 

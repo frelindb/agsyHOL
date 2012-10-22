@@ -52,6 +52,29 @@ initMeta = do
 
 -- -----------------------
 
+expandmeta :: Metavar a b -> (a -> IO c) -> IO c
+expandmeta m cnt = do
+ Just bind <- readIORef $ mbind m
+ cnt bind
+
+crmeta :: a -> IO (Metavar a b)
+crmeta x = do
+ x1 <- newIORef $ Just x
+ x2 <- newIORef False
+ x4 <- newIORef []
+ x5 <- newIORef []
+ return $ Metavar {mid = (-1), mbind = x1, mprincpres = x2, mbinfos = x4, mobs = x5}
+
+expandmm :: MM a b -> (a -> IO c) -> IO c
+expandmm x cnt = do
+ NotM bind <- expandbind x
+ cnt bind
+
+class ExpandMetas a where
+ expandmetas :: a -> IO a
+
+-- -----------------------
+
 type RefCreateEnv = StateT Int IO
 
 class Refinable a blk | a -> blk where

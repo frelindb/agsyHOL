@@ -1,4 +1,3 @@
-
 import System.Environment
 import System.Exit
 import System.Process
@@ -19,6 +18,8 @@ import Parser
 import Translate
 import Transform
 import ProofExport
+import ProofExportTPTP
+
 
 
 
@@ -56,40 +57,44 @@ itdeepSearch stop depth step f = do
  b <- stop res
  when (not b) $ itdeepSearch stop (depth + step) step f
 
-solveProb :: Bool -> Bool -> Maybe Int -> Maybe Int -> Problem -> IO Bool
-solveProb doproof doagdaproof inter mdepth prob =
+solveProb :: Bool -> Maybe Int -> Maybe Int -> Problem -> IO (Maybe [(String, MetaProof)])
+solveProb saveproofs inter mdepth prob = do
+ prfs <- newIORef []
+ let
+  doconjs [] = do
+   prfs <- readIORef prfs
+   return $ Just prfs
+  doconjs ((name, conj) : conjs) = do
+   ticks <- newIORef 0
+   nsol <- newIORef 1
+   prf <- initMeta
+   let hsol = when saveproofs $ do
+               prfcpy <- expandmetas prf
+               modifyIORef prfs ((name, prfcpy) :)
+       p d = andp (checkProof d [] (cl conj) prf)
+                  (sidecontrol prf (SCState {scsCtx = 0, scsHyps = [], scsNewHyp = NewGlobHyps}))
+       stop res = do
+        nsol' <- readIORef nsol
+        return $ nsol' == 0 || res == False
+       ss d di = topSearch (isJust inter) ticks nsol hsol (BIEnv (prGlobHyps prob)) (p d) d di
+   case mdepth of
+    Just depth ->
+     ss depth (depth + 1) >> return ()
+    Nothing -> case isJust inter of
+     True ->
+      ss 100000000 (100000000 + 1) >> return ()
+     False ->
+      itdeepSearch stop 999 1000 (\d -> ss d 1000)
+   nsol <- readIORef nsol
+   if nsol == 0 then
+     doconjs conjs
+    else
+     return Nothing
  case inter of
   Just idx ->
    doconjs [prConjectures prob !! idx]
   Nothing ->
    doconjs (prConjectures prob)
- where
- doconjs [] = return True
- doconjs ((name, conj) : conjs) = do
-  ticks <- newIORef 0
-  nsol <- newIORef 1
-  prf <- initMeta
-  let hsol = do when doproof $ putStrLn ("proof for " ++ name ++ ":") >> prProof 0 prf >>= putStrLn
-                when (doagdaproof && isNothing inter) $ agdaProof prob name prf
-      p d = andp (checkProof d [] (cl conj) prf)
-                 (sidecontrol prf (SCState {scsCtx = 0, scsHyps = [], scsNewHyp = NewGlobHyps}))
-      stop res = do
-       nsol' <- readIORef nsol
-       return $ nsol' == 0 || res == False
-      ss d di = topSearch (isJust inter) ticks nsol hsol (BIEnv (prGlobHyps prob)) (p d) d di
-  case mdepth of
-   Just depth ->
-    ss depth (depth + 1) >> return ()
-   Nothing -> case isJust inter of
-    True ->
-     ss 100000000 (100000000 + 1) >> return ()
-    False ->
-     itdeepSearch stop 999 1000 (\d -> ss d 1000)
-  nsol <- readIORef nsol
-  if nsol == 0 then
-    doconjs conjs
-   else
-    return False
 
 -- ---------------------------------
 
@@ -100,6 +105,7 @@ data CLArgs = CLArgs {
  finteractive :: Maybe Int,
  fnotransform :: Bool,
  fagdaproof :: Bool,
+ ftptpproof :: Bool,
  ftimeout :: Maybe Int,
  fcheck :: Bool,
  fdepth :: Maybe Int,
@@ -111,8 +117,8 @@ doit args = do
  tptpprob <- getProb (fincludedir args) (problemfile args)
  case tptpprob of
   FailP err -> do
+   szs_status args "Error" "parse error"
    putStrLn err
-   putStrLn "parse error"
   OkP tptpprob -> do
    let probname = (reverse . takeWhile (/= '/') . drop 2 . reverse) (problemfile args)
        prob = translateProb probname tptpprob
@@ -126,12 +132,30 @@ doit args = do
 
    case fcheck args of
     False -> case prConjectures trprob of
-     [] -> putStrLn "no conjecture to prove"
+     [] -> szs_status args "Error" "no conjecture to prove"
      _ -> do
-      res <- solveProb (fproof args) (fagdaproof args) (finteractive args) (fdepth args) trprob
+      res <- solveProb (fproof args || (fagdaproof args && isNothing (finteractive args)) || ftptpproof args) (finteractive args) (fdepth args) trprob
       case res of
-       True -> putStrLn "solution found"
-       False -> putStrLn "exhaustive search"
+       Just prfs -> do
+        szs_status args "Theorem" ""  -- solution found
+        when (fproof args) $ do
+         putStrLn $ "% SZS output start Proof for " ++ problemfile args
+         putStrLn $ "Proofs are terms in the proof language internally used by agsyHOL."
+         putStrLn $ "Use option --agda-proof to produce agda checkable proofs."
+         putStrLn $ "The transformed problem consists of the following conjectures:"
+         putStrLn $ concatMap (\x -> ' ' : fst x) (reverse prfs)
+         mapM_ (\(name, prf) ->
+           putStrLn ("\nproof for " ++ name ++ ":") >> prProof 0 prf >>= putStrLn
+          ) $ reverse prfs
+         putStrLn $ "% SZS output end Proof for " ++ problemfile args
+        when (fagdaproof args && isNothing (finteractive args)) $ do
+         putStrLn $ "One top-level file is created for each conjecture in the transformed problem."
+         putStrLn $ "The names of these files are:"
+         mapM_ (\(name, prf) ->
+           agdaProof trprob name prf
+          ) $ reverse prfs
+        when (ftptpproof args) $ tptpproof tptpprob prob trprob (reverse prfs)
+       Nothing -> szs_status args "GaveUp" ""  -- exhaustive search
     True -> do
      when (fshowproblem args) $ putStrLn "checking globhyps:"
      okhyps <- mapM (\gh -> do
@@ -159,9 +183,13 @@ doit args = do
        else
         " ok"
 
+szs_status args status comment =
+ putStrLn $ "% SZS status " ++ status ++ " for " ++ problemfile args ++ (if null comment then "" else (" : " ++ comment))
+
+
 main = do
  args <- getArgs
- case consume "--tptp-mode" args of
+ case consume "--safe-mode" args of
   Nothing ->
    case ["--help"] == args of
     False ->
@@ -174,7 +202,7 @@ main = do
          res <- timeout (seconds * 1000000) $ doit args
          case res of
           Just () -> return ()
-          Nothing -> putStrLn "time-out"
+          Nothing -> szs_status args "Timeout" ""
       Nothing -> do
        putStrLn "command argument error\n"
        printusage
@@ -190,29 +218,24 @@ main = do
      (exitcode, out, err) <-
       readProcessWithExitCode
        prgname
-       (args ++ ["+RTS", "-t", "-RTS"])
+       args
        ""
-     let (status, comment) = case exitcode of
-                              ExitSuccess ->
-                               case last (lines out) of
-                                "parse error" -> ("Error", "parse error")
-                                "no conjecture to prove" -> ("Error", "no conjecture to prove")
-                                "solution found" -> ("Theorem", "")
-                                "exhaustive search" -> ("GaveUp", "")
-                                "time-out" -> ("Timeout", "")
-                              ExitFailure code ->
-                               ("Error", "program stopped abnormally, exitcode: " ++ show code)
-     putStrLn $ "% SZS status " ++ status ++ " for " ++ problemfile pargs ++ (if null comment then "" else (" : " ++ comment))
+     case exitcode of
+      ExitSuccess ->
+       return ()
+      ExitFailure code ->
+       szs_status pargs "Error" ("program stopped abnormally, exitcode: " ++ show code)
      putStrLn out
      putStrLn err
 
-parseargs = g (CLArgs {problemfile = "", fproof = False, finteractive = Nothing, fnotransform = False, fagdaproof = False, ftimeout = Nothing, fcheck = False, fdepth = Nothing, fincludedir = "", fshowproblem = False})
+parseargs = g (CLArgs {problemfile = "", fproof = False, finteractive = Nothing, fnotransform = False, fagdaproof = False, ftptpproof = False, ftimeout = Nothing, fcheck = False, fdepth = Nothing, fincludedir = "", fshowproblem = False})
  where
   g a [] = if null (problemfile a) then Nothing else Just a
   g a ("--proof" : xs) = g (a {fproof = True}) xs
   g a ("--interactive" : n : xs) = g (a {finteractive = Just (read n)}) xs
   g a ("--no-transform" : xs) = g (a {fnotransform = True}) xs
   g a ("--agda-proof" : xs) = g (a {fagdaproof = True}) xs
+  g a ("--tptp-proof" : xs) = g (a {ftptpproof = True}) xs
   g a ("--time-out" : n : xs) = g (a {ftimeout = Just (read n)}) xs
   g a ("--check" : xs) = g (a {fcheck = True}) xs
   g a ("--depth" : n : xs) = g (a {fdepth = Just (read n)}) xs
@@ -233,17 +256,22 @@ printusage = putStr $
  "agsyHOL <flags> file <flags>\n" ++
  " file is a TPTP THF problem file.\n" ++
  " flags:\n" ++
- "  --tptp-mode      Call itself without this flag in order to catch errors and control rts options.\n" ++
- "                   Output SZS classification.\n" ++
+ "  --safe-mode      Catches unhandled errors.\n" ++
  "  --proof          Output a proof (in internal format).\n" ++
- "                   Note that some sub proofs can be printed although not all sub problems are solved.\n" ++
  "  --interactive n  Do interactive search for subproblem n (n=0,1,2..).\n" ++
+ "                   Use --show-problem to see the list of subproblems.\n" ++
  "  --no-transform   Do not transform problem. (Normally the number of negations is minimized.)\n" ++
- "  --agda-proof     Save agda proof files named Proof-<probname>.agda and Proof-<probname>-subproof-<nn>.agda in current directory.\n" ++
+ "  --agda-proof     Save agda proof files named Proof-<problem_name>-<conjecture_name>.agda and\n" ++
+ "                   Proof-<problem_name>-<conjecture_name>-<nn>.agda in current directory.\n" ++
+ "                   In order to check the proof with agda, run it on all files listed in the output.\n" ++
+ "                   Note that the agda files in the soundness directory must be in scope.\n" ++
  "  --time-out n     Set timeout in seconds. (default: no time out)\n" ++
  "  --check          Just check the problem for well formedness.\n" ++
- "  --depth n        Set search depth. (default: iterated deepening for auto mode (start depth: 999, step: 1000), unlimited depth for interactive mode)\n" ++
+ "  --depth n        Set search depth. (default: iterated deepening for auto mode (start depth: 999, step: 1000),\n" ++
+ "                   unlimited depth for interactive mode)\n" ++
  "  --include-dir p  Set path to axiom files.\n" ++
- "  --show-problem   Display original and transformed problem in internal format and, combined with --check, show check failure details.\n" ++
+ "  --show-problem   Display original and transformed problem in internal format.\n" ++
+ "                   Combined with --check also show check failure details.\n" ++
+ "  +RTS .. -RTS     Give general ghc run time system options, e.g. -t which outputs time and memory usage information.\n" ++
  "  --help           Show this help.\n"
 
