@@ -140,17 +140,14 @@ doit args = do
         szs_status args "Theorem" ""  -- solution found
         when (fproof args) $ do
          putStrLn $ "% SZS output start Proof for " ++ problemfile args
-         putStrLn $ "Proofs are terms in the proof language internally used by agsyHOL."
-         putStrLn $ "Use option --agda-proof to produce agda checkable proofs."
          putStrLn $ "The transformed problem consists of the following conjectures:"
          putStrLn $ concatMap (\x -> ' ' : fst x) (reverse prfs)
          mapM_ (\(name, prf) ->
-           putStrLn ("\nproof for " ++ name ++ ":") >> prProof 0 prf >>= putStrLn
+           putStrLn ("\nProof for " ++ name ++ ":") >> prProof 0 prf >>= putStrLn
           ) $ reverse prfs
          putStrLn $ "% SZS output end Proof for " ++ problemfile args
         when (fagdaproof args && isNothing (finteractive args)) $ do
-         putStrLn $ "One top-level file is created for each conjecture in the transformed problem."
-         putStrLn $ "The names of these files are:"
+         putStrLn $ "The following top-level files were created:"
          mapM_ (\(name, prf) ->
            agdaProof trprob name prf
           ) $ reverse prfs
@@ -257,7 +254,8 @@ printusage = putStr $
  " file is a TPTP THF problem file.\n" ++
  " flags:\n" ++
  "  --safe-mode      Catches unhandled errors.\n" ++
- "  --proof          Output a proof (in internal format).\n" ++
+ "  --proof          Output a proof (in internal format, one proof for each conjecture\n" ++
+ "                   of the transformed problem).\n" ++
  "  --interactive n  Do interactive search for subproblem n (n=0,1,2..).\n" ++
  "                   Use --show-problem to see the list of subproblems.\n" ++
  "  --no-transform   Do not transform problem. (Normally the number of negations is minimized.)\n" ++
