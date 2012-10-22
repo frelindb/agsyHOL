@@ -95,9 +95,9 @@ agdaProof_onlyusedhypsincluded prob conjname proof = do
      case elr of
       HVar v -> return (pre ++ prHypVar ctx v, "", ityp)
       HGlob gh -> return (pre ++ prGHypVar ctx (ghName gh) ++"{- " ++ fixname (ghName gh) ++ " -}", "", ityp)
-      AC _ qf p -> do
+      AC qtyp qf p -> do
+       p <- eProof ctx (cl $ NotM $ C nu Exists [T (Meta qtyp), F (Meta qf)]) p
        qf <- eForm ctx $ Meta qf
-       p <- eProof ctx (error "AC etyp") p
        return (preac ++ "(!-E " ++ qf ++ " (=>-E " ++ p, "))", ityp)
    where
     pre = if eqp then "step _ _ " else "elim "
@@ -423,9 +423,9 @@ agdaProof_onlyusedhypsincluded prob conjname proof = do
  writeIORef sis [chunksize]
  proof <- eProof [] (cl tt) proof
  subprfs <- readIORef subprfs
- putStrLn ("Proof-" ++ prName prob ++ "-" ++ (fixname conjname) ++ ".agda")
- writeFile ("Proof-" ++ prName prob ++ "-" ++ (fixname conjname) ++ ".agda") $
-  "module Proof-" ++ prName prob ++ "-" ++ (fixname conjname) ++ " where\n" ++
+ putStrLn ("Proof-" ++ fixname (prName prob) ++ "-" ++ (fixname conjname) ++ ".agda")
+ writeFile ("Proof-" ++ fixname (prName prob) ++ "-" ++ (fixname conjname) ++ ".agda") $
+  "module Proof-" ++ fixname (prName prob) ++ "-" ++ (fixname conjname) ++ " where\n" ++
   "\n" ++
   "open import StdLibStuff\n" ++
   "\n" ++
@@ -448,8 +448,8 @@ agdaProof_onlyusedhypsincluded prob conjname proof = do
   "proof = sound-top _ " ++ wrapProof2 (prGlobVars prob) proof ++ "\n"
  when multiplefiles $
   mapM_ (\(idx, p) ->
-   writeFile ("Proof-" ++ prName prob ++ "-" ++ (fixname conjname) ++ "-" ++ show idx ++ ".agda") $
-    "module Proof-" ++ prName prob ++ "-" ++ (fixname conjname) ++ "-" ++ show idx ++ " where\n" ++
+   writeFile ("Proof-" ++ fixname (prName prob) ++ "-" ++ (fixname conjname) ++ "-" ++ show idx ++ ".agda") $
+    "module Proof-" ++ fixname (prName prob) ++ "-" ++ (fixname conjname) ++ "-" ++ show idx ++ " where\n" ++
     "\n" ++
     "open import StdLibStuff\n" ++
     "\n" ++
@@ -465,13 +465,14 @@ agdaProof_onlyusedhypsincluded prob conjname proof = do
   importsubproofs :: String -> String -> String
   importsubproofs me s =
    concatMap (\idx ->
-    "open import Proof-" ++ prName prob ++ "-" ++ (fixname conjname) ++ "-" ++ idx ++ "\n"
+    "open import Proof-" ++ fixname (prName prob) ++ "-" ++ (fixname conjname) ++ "-" ++ idx ++ "\n"
    ) $ gg s
    where
     gg s | take (1 + length (fixname conjname)) s == (fixname conjname) ++ "-" =
      let (idx, s') = span (\c -> c >= '0' && c <= '9') $ drop (1 + length (fixname conjname)) s
          sps = gg s'
      in  if elem idx sps || idx == me then sps else (idx : sps)
+    gg ('{':'-':s) = gg $ drop 1 $ dropWhile (/= '}') s
     gg (c:s) = gg s
     gg [] = []
 
@@ -747,6 +748,7 @@ prNat n = "(suc " ++ prNat (n - 1) ++ ")"
 
 fixname [] = []
 fixname ('_':xs) = '-' : fixname xs
+fixname ('.':xs) = '-' : fixname xs
 fixname (x:xs) = x : fixname xs
 
 condWrap :: Bool -> String -> String -> IO String -> IO String

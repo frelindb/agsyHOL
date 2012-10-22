@@ -385,7 +385,9 @@ instance ExpandMetas MetaProof where
     h <- expandmetas h
     p <- expandmetas p
     crmeta $ Elim h p
-   RAA p -> undefined
+   RAA p -> do
+    p <- expandmetas p
+    crmeta $ RAA p
 
 instance ExpandMetas MetaIntro where
  expandmetas p =
