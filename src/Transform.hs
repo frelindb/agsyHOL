@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleContexts #-}
 module Transform where
 
 import Control.Monad.State
