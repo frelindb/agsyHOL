@@ -81,8 +81,12 @@ F => G = (~ F) || G
 ![_]_ : ∀ {n} → {Γ : Ctx n} → (α : Type n) → Form (α ∷ Γ) $o → Form Γ $o
 ![ α ] F = app Π (lam α F)
 
+infix 25 ![_]_
+
 ?[_]_ : ∀ {n} → {Γ : Ctx n} → (α : Type n) → Form (α ∷ Γ) $o → Form Γ $o
 ?[ α ] F = ~ (![ α ] ~ F)
+
+infix 25 ?[_]_
 
 ι : ∀ {n} → {Γ : Ctx n} → (α : Type n) → Form (α ∷ Γ) $o → Form Γ α
 ι α F = app i (lam α F)
@@ -104,6 +108,8 @@ $false = ![ $o ] var this refl
 
 ^[_]_ : ∀ {n Γ t₂} → (t₁ : Type n) → Form (t₁ ∷ Γ) t₂ → Form Γ (t₁ > t₂)
 ^[ tp ] t = lam tp t
+
+infix 25 ^[_]_
 
 _·_ : ∀ {n} → {Γ : Ctx n} → ∀ {t₁ t₂} → Form Γ (t₁ > t₂) → Form Γ t₁ → Form Γ t₂
 t₁ · t₂ = app t₁ t₂
@@ -702,8 +708,12 @@ mutual
 !'[_]_ : ∀ {n} → {Γ : Ctx n} → (α : Type n) → Form Γ (α > $o) → Form Γ $o
 !'[ α ] F = app Π F
 
+infix 25 !'[_]_
+
 ?'[_]_ : ∀ {n} → {Γ : Ctx n} → (α : Type n) → Form Γ (α > $o) → Form Γ $o
 ?'[ α ] F = ?[ α ] (weak F · $ this {refl})
+
+infix 25 ?'[_]_
 
 ι' : ∀ {n} → {Γ : Ctx n} → (α : Type n) → Form Γ (α > $o) → Form Γ α
 ι' α F = app i F
