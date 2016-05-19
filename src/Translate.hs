@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleContexts #-}
 module Translate where
 
 import Data.Map (Map)

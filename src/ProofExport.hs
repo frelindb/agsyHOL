@@ -181,7 +181,7 @@ agdaProof_onlyusedhypsincluded prob conjname proof = do
      let HNC _ Or [F typ1, F typ2] = ityp
      p1 <- eProof (Hp typ1 : ctx) (lift 1 etyp) p1
      p2 <- eProof (Hp typ2 : ctx) (lift 1 etyp) p2
-     return $ "(||-E (=>-I " ++ p1 ++ ") (=>-I " ++ p2 ++ "))"
+     return $ "(or-E (=>-I " ++ p1 ++ ") (=>-I " ++ p2 ++ "))"
     NTElimStep p -> eNTElimStep (eProofElim ctx etyp) ctx ityp p
 
   eNTElimStep :: (CFormula -> a -> IO String) -> ECtx -> HNFormula -> NTElimStep a -> IO String
@@ -237,11 +237,11 @@ agdaProof_onlyusedhypsincluded prob conjname proof = do
     OrIl p -> do
      let HNC _ Or [F typ, _] = etyp
      p <- eProof ctx typ p
-     return $ "(||-I-l " ++ p ++ ")"
+     return $ "(or-I-l " ++ p ++ ")"
     OrIr p -> do
      let HNC _ Or [_, F typ] = etyp
      p <- eProof ctx typ p
-     return $ "(||-I-r " ++ p ++ ")"
+     return $ "(or-I-r " ++ p ++ ")"
     AndI p1 p2 -> do
      let HNC _ And [F typ1, F typ2] = etyp
      p1 <- eProof ctx typ1 p1

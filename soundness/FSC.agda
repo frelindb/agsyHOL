@@ -29,10 +29,10 @@ lookup-hyp .(t ∷ Γ) (skip {Γ-t} {t} {Γ} x) = weak (lookup-hyp Γ x)
 
 mutual
  data _⊢_ {n : ℕ} {Γ-t : Ctx n} (Γ : FSC-Ctx n Γ-t) : Form Γ-t $o → Set where
-  ||-I-l : {F G : Form Γ-t $o} →
+  or-I-l : {F G : Form Γ-t $o} →
          Γ ⊢ F →
          Γ ⊢ (F || G)
-  ||-I-r : {F G : Form Γ-t $o} →
+  or-I-r : {F G : Form Γ-t $o} →
          Γ ⊢ G →
          Γ ⊢ (F || G)
   &-I : {F G : Form Γ-t $o} →
@@ -93,7 +93,7 @@ mutual
   ~-E : {F H : Form Γ-t $o} →
    Γ ⊢ F →
    Γ , ~ F ⊢ H
-  ||-E : {F G H : Form Γ-t $o} →
+  or-E : {F G H : Form Γ-t $o} →
    Γ ⊢ (F => H) →
    Γ ⊢ (G => H) →
    Γ , F || G ⊢ H
